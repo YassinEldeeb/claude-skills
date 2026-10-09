@@ -1,0 +1,8 @@
+{
+  "name": "yassin-skills",
+  "description": "Skills for shipping fast with Claude",
+  "owner": { "name": "Yassin Eldeeb" },
+  "plugins": [
+    { "name": "ship", "source": "./plugins/ship", "description": "deadline-mode: plan backward from a hard deadline, cut scope, parallelize, never idle" }
+  ]
+}
