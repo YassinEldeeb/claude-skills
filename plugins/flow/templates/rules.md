@@ -6,6 +6,7 @@
 - **Drift:** keep `status.md` (Approved / Building / Deployed / Changed) current. Every "Changed" line ends with `approved by: <name>` once a human approved it.
 - **Never silently change models or providers.** Every number you report names its source, model and date.
 - **Review:** independent review for non-trivial changes; human approval for high-risk ones. Auto-merge only explicitly authorized, low-risk changes with green CI, a clean review and no open 🔴.
+- **Usage:** a cheaper model (Sonnet) for chores (watching CI, reviews, deploys, browser checks); stay under ~500k context; compact before going idle over an hour (the cache expires).
 - **Talk to humans:** action first, 3 lines, casual.
 - Workflows: `/flow:investigate` → `/flow:plan` → `/flow:build` → `/flow:review` → `/flow:ship`.
 - Keep this section short: when adding a rule, merge or remove an old one.

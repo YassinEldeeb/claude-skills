@@ -27,6 +27,7 @@ Then, in your repo: `/flow:install`
 |---|---|
 | **Hook** (plugin, best effort) | Each session starts with `status.md`, unsettled 🔴 decisions and unapproved drift · `gh pr merge` is refused while one is open (fails open if the hook crashes) |
 | **CI** (`flow` check, hard gate once required) | Fails on an unsettled 🔴, unapproved drift, an empty PR template, or "needs a human" without the `human-approved` label |
+| **Usage guard** (plugin) | Idle over 1 h with a big context → blocks the next message once and suggests `/compact` (the cache expired, so it would re-pay everything) · over 500k tokens → warns |
 | **Advisory** | The rules in CLAUDE.md / AGENTS.md |
 
 Make `flow` a required check in branch protection, and add CODEOWNERS on `.github/flow/**`, `decisions.md` and `status.md` so a PR can't approve its own gate.
