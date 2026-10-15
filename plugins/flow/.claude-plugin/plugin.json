@@ -1,0 +1,1 @@
+{ "name": "flow", "description": "Shipping with AI: investigate → plan → build → review → ship, an autonomy contract, drift tracking, and hooks + CI that enforce it", "version": "1.0.0", "author": { "name": "Yassin Eldeeb" } }
