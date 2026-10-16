@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, test } from "node:test";
-import { approveLine, checkToPost, diffHash, evaluate, globToRegExp, parseUnifiedDiff, prNumbersFromEvent, render, signedMessage, sshVerifier } from "../gate/lib.mjs";
+import { approveLine, checkToPost, commentState, diffHash, headPrsFrom, evaluate, globToRegExp, parseUnifiedDiff, prNumbersFromEvent, render, signedMessage, sshVerifier } from "../gate/lib.mjs";
 import { CONFIG, comment, ctx, green, hashOf, task, taskFiles } from "./fixtures.mjs";
 
 const has = (result, text) => result.blockers.some((b) => b.includes(text));
@@ -397,6 +397,28 @@ describe("e2e findings (real GitHub sandbox, 2026-10-16)", () => {
     const config = { ...CONFIG, branches: ["main", "release"] };
     const r = await evaluate({ ...ctx({ ...passing(task("medium")), config }), headPrs: [{ number: 5, base: "release" }] });
     assert.ok(has(r, "PR #5 into release, another protected branch"));
+  });
+  test("only /flow comments by people decide whether a verdict is stale", () => {
+    const base = [{ id: 1, user: { type: "User" }, body: "/flow approve T-1 spec@" + "a".repeat(24), updated_at: "t1" }];
+    const thanks = [...base, { id: 2, user: { type: "User" }, body: "thanks!", updated_at: "t2" }];
+    const dash = [...base, { id: 3, user: { type: "Bot" }, body: "<!-- flow:dashboard --> /flow", updated_at: "t3" }];
+    assert.equal(commentState(thanks), commentState(base), "a plain comment triggers no run, so it can't make a verdict stale");
+    assert.equal(commentState(dash), commentState(base), "the gate's own dashboard doesn't count");
+    assert.notEqual(commentState([{ ...base[0], updated_at: "t9" }]), commentState(base), "an edited approval does");
+  });
+  test("head PRs: only open PRs whose head is this commit", () => {
+    const pulls = [
+      { number: 1, state: "open", head: { sha: "h" }, base: { ref: "main" } },
+      { number: 2, state: "closed", head: { sha: "h" }, base: { ref: "side" } },
+      { number: 3, state: "open", head: { sha: "later" }, base: { ref: "main" } },
+    ];
+    assert.deepEqual(headPrsFrom(pulls, "h"), [{ number: 1, base: "main" }]);
+    assert.deepEqual(headPrsFrom({ message: "error" }, "h"), []);
+  });
+  test("escaping: &#64; can't smuggle a mention; only an approval hash keeps a bare @", async () => {
+    const out = render(await evaluate(ctx(passing(task("medium", { title: "&#64;acme ship@evil.com" })))));
+    assert.ok(!out.includes("&#64;acme"), "the entity is escaped");
+    assert.ok(!out.includes("ship@evil"), "ship@ followed by a non-hash gets the zero-width space");
   });
   test("a workflow_run judges every PR it lists, not just the first", () => {
     assert.deepEqual(prNumbersFromEvent("workflow_run", { workflow_run: { pull_requests: [{ number: 3 }, { number: 2 }, { number: 3 }] } }), [3, 2]);

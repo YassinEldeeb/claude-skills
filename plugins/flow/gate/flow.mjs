@@ -5,7 +5,7 @@ import { execFileSync } from "node:child_process";
 import { appendFileSync, existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-  FLOW_VERSION, approveLine, configErrors, detectSignals, evaluate, parseApprovals, parseUnifiedDiff, checkToPost, prNumbersFromEvent, render, signedMessage, specDocPaths, specHash, sshVerifier, taskErrors,
+  FLOW_VERSION, approveLine, configErrors, detectSignals, evaluate, parseApprovals, parseUnifiedDiff, checkToPost, commentState, headPrsFrom, prNumbersFromEvent, render, signedMessage, specDocPaths, specHash, sshVerifier, taskErrors,
 } from "./lib.mjs";
 
 const USAGE = `flow ${FLOW_VERSION}
@@ -133,8 +133,7 @@ async function gather(repo, number, { configText } = {}) {
   ].sort((a, b) => String(a.started_at ?? "").localeCompare(String(b.started_at ?? "")));
   ctx.baseRoot = Array.isArray(root) ? root.map((entry) => entry.name) : null;
   // PRs whose HEAD is this commit (the endpoint also lists PRs that merely contain it, e.g. stacked ones).
-  const headPrs = await api(`repos/${repo}/commits/${head}/pulls?per_page=100`).catch(() => null);
-  ctx.headPrs = (Array.isArray(headPrs) ? headPrs : []).filter((p) => p.head?.sha === head && p.state === "open").map((p) => ({ number: p.number, base: p.base?.ref }));
+  ctx.headPrs = headPrsFrom(await api(`repos/${repo}/commits/${head}/pulls?per_page=100`).catch(() => null), head);
   ctx.deployments = [];
   if (pr.merged && pr.merge_commit_sha) {
     for (const d of await api(`repos/${repo}/deployments?sha=${pr.merge_commit_sha}&per_page=20`).catch(() => [])) {
@@ -231,9 +230,6 @@ async function checkOne(repo, number, { post, configFile }) {
   console.log(summary);
   return post ? 0 : result.ok ? 0 : 1;
 }
-
-/** Comments by people (not the gate's own dashboard): ids and edit times. */
-const commentState = (comments) => comments.filter((c) => c.user?.type !== "Bot").map((c) => `${c.id}:${c.updated_at}`).join(",");
 
 async function postCheck(repo, sha, { ok, title, summary }) {
   const clipped = summary.length > 60_000 ? `${summary.slice(0, 60_000)}\n\n… (truncated)` : summary;

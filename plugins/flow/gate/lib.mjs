@@ -38,8 +38,8 @@ const PLACEHOLDER = /^(n\/?a|none|tbd|todo|\?+|-+|\.+|<.*>)$/i;
 export const substantive = (value) => str(value) && !PLACEHOLDER.test(value.trim()) && value.trim().length >= 12;
 const lower = (value) => String(value ?? "").toLowerCase();
 /** Text from task files shown in Markdown: no links, mentions, HTML or table breaks. */
-const esc = (value) => String(value ?? "").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/[\\`*_[\]|#~]/g, "\\$&")
-  .replace(/(?<!\b(?:spec|ship|override))@/g, "@\u200b").replace(/:\/\//g, ":\u200b//").replace(/www\./gi, "www\u200b.").replace(/[\r\n]+/g, " ");
+const esc = (value) => String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/[\\`*_[\]|#~]/g, "\\$&")
+  .replace(/(?<!\b(?:spec|ship|override))@|@(?![0-9a-f]{24}\b)/g, "@\u200b").replace(/:\/\//g, ":\u200b//").replace(/www\./gi, "www\u200b.").replace(/[\r\n]+/g, " ");
 /** A line made of gate text and task text: escape it all, then restore the approval lines the gate itself quotes. */
 const escLine = (line) => esc(line).replace(/\\`(\/flow approve [A-Z][A-Z0-9]*-\d+ (?:spec|ship|override)@[0-9a-f]{24})\\`/g, "`$1`");
 /** Repo paths taken from task data: relative, no empty, "." or ".." segments (they could reach other API endpoints). */
@@ -743,6 +743,15 @@ export function checkToPost(result) {
   const title = result.error ? "flow: error" : result.ok ? `flow: pass${result.tier ? ` (${result.tier})` : ""}` : `flow: ${result.blockers.length} blocker${result.blockers.length === 1 ? "" : "s"}`;
   return { ok: !!result.ok, title };
 }
+
+/**
+ * What the gate's verdict depends on among PR comments: the ones the workflow re-runs for (by a person, mentioning
+ * /flow). If this changes during a check, a newer run is queued and will judge; other comments never matter.
+ */
+export const commentState = (comments) => comments.filter((c) => c.user?.type !== "Bot" && (c.body ?? "").includes("/flow")).map((c) => `${c.id}:${c.updated_at}`).join(",");
+
+/** Open PRs whose head is exactly this commit (GitHub's commits/{sha}/pulls also lists PRs that merely contain it). */
+export const headPrsFrom = (pulls, head) => (Array.isArray(pulls) ? pulls : []).filter((p) => p.head?.sha === head && p.state === "open").map((p) => ({ number: p.number, base: p.base?.ref }));
 
 /** The PRs an Actions event asks the gate to judge. A workflow_run can list several PRs that share its head commit. */
 export function prNumbersFromEvent(eventName, event) {
