@@ -39,7 +39,7 @@ export const substantive = (value) => str(value) && !PLACEHOLDER.test(value.trim
 const lower = (value) => String(value ?? "").toLowerCase();
 /** Text from task files shown in Markdown: no links, mentions, HTML or table breaks. */
 const esc = (value) => String(value ?? "").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/[\\`*_[\]|#~]/g, "\\$&")
-  .replace(/(^|[^\w`])@(?=[A-Za-z0-9])/g, "$1@\u200b").replace(/:\/\//g, ":\u200b//").replace(/www\./gi, "www\u200b.").replace(/[\r\n]+/g, " ");
+  .replace(/(?<!\b(?:spec|ship|override))@/g, "@\u200b").replace(/:\/\//g, ":\u200b//").replace(/www\./gi, "www\u200b.").replace(/[\r\n]+/g, " ");
 /** A line made of gate text and task text: escape it all, then restore the approval lines the gate itself quotes. */
 const escLine = (line) => esc(line).replace(/\\`(\/flow approve [A-Z][A-Z0-9]*-\d+ (?:spec|ship|override)@[0-9a-f]{24})\\`/g, "`$1`");
 /** Repo paths taken from task data: relative, no empty, "." or ".." segments (they could reach other API endpoints). */
@@ -485,10 +485,14 @@ export async function evaluate(ctx) {
   }
   const mode = (config.signers ?? []).length ? "signed" : "login";
   const shipHash = diffHash(ctx.files);
-  // Seen in the e2e test: once a commit has been the head of a PR into another branch, GitHub's ruleset may stop
-  // counting the "flow" check for this PR's merge ("Required status check flow is expected"). It fails safe; a new commit clears it.
+  // Check runs belong to the commit. Another open PR whose head is this commit shares this verdict:
+  // into another protected branch, the two verdicts would overwrite each other (blocker); into an unprotected one, the
+  // e2e test saw GitHub stop counting "flow" for this merge ("expected"), which fails safe (note).
   const shared = (ctx.headPrs ?? []).filter((p) => p.number !== ctx.pr.number && p.base !== ctx.pr.base);
-  if (shared.length) unknowns.push(`this commit is also the head of ${shared.map((p) => `PR #${p.number} (into ${p.base})`).join(", ")}: if GitHub says the required "flow" check is "expected" although it passed, push a new commit (an empty one keeps the ship approval)`);
+  for (const p of shared) {
+    if (protectedBranches.includes(p.base)) blockers.push(`this commit is also the head of PR #${p.number} into ${p.base}, another protected branch: check runs belong to the commit, so the two PRs' verdicts would overwrite each other. Give each PR its own commit`);
+    else unknowns.push(`this commit is also the head of PR #${p.number} (into ${p.base}): if GitHub says the required "flow" check is "expected" although it passed, push a new commit (an empty one keeps the ship approval)`);
+  }
 
   const signals = detectSignals(ctx.files, config, ctx.baseRoot);
   const detectedTier = maxTier(signals.map((s) => s.tier));

@@ -132,7 +132,9 @@ async function gather(repo, number, { configText } = {}) {
     ...statuses.map((s) => ({ name: s.context, status: s.state === "pending" ? "in_progress" : "completed", conclusion: s.state === "pending" ? null : s.state === "success" ? "success" : "failure", started_at: s.updated_at })),
   ].sort((a, b) => String(a.started_at ?? "").localeCompare(String(b.started_at ?? "")));
   ctx.baseRoot = Array.isArray(root) ? root.map((entry) => entry.name) : null;
-  ctx.headPrs = ((await api(`repos/${repo}/commits/${head}/pulls?per_page=100`).catch(() => null)) ?? []).map((p) => ({ number: p.number, base: p.base?.ref }));
+  // PRs whose HEAD is this commit (the endpoint also lists PRs that merely contain it, e.g. stacked ones).
+  const headPrs = await api(`repos/${repo}/commits/${head}/pulls?per_page=100`).catch(() => null);
+  ctx.headPrs = (Array.isArray(headPrs) ? headPrs : []).filter((p) => p.head?.sha === head && p.state === "open").map((p) => ({ number: p.number, base: p.base?.ref }));
   ctx.deployments = [];
   if (pr.merged && pr.merge_commit_sha) {
     for (const d of await api(`repos/${repo}/deployments?sha=${pr.merge_commit_sha}&per_page=20`).catch(() => [])) {
@@ -174,6 +176,7 @@ async function check() {
   if (post && configFile) throw new Error("--config is for local dry runs; the posted gate always reads the protected branch's config");
   const repo = opt("repo") || process.env.GITHUB_REPOSITORY || repoFromGit();
   const number = opt("pr") ? Number(opt("pr")) : undefined;
+  if (number !== undefined && !(Number.isInteger(number) && number > 0)) throw new Error(`--pr must be a PR number (got ${opt("pr")})`);
   const eventName = process.env.GITHUB_EVENT_NAME;
   const event = process.env.GITHUB_EVENT_PATH ? JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, "utf8")) : {};
   if (eventName === "merge_group") {
@@ -186,15 +189,19 @@ async function check() {
   if (!numbers.length && eventName === "workflow_run") { console.log("workflow_run without a same-repo PR: nothing to judge"); return 0; }
   if (!repo || !numbers.length) throw new Error("no PR to check: pass --pr N (and --repo owner/name outside a GitHub checkout)");
   let code = 0;
-  for (const n of numbers) code = Math.max(code, await checkOne(repo, n, { post, configFile }));
+  for (const n of numbers) {
+    // One PR's failure must not leave the others with a stale verdict.
+    try { code = Math.max(code, await checkOne(repo, n, { post, configFile })); } catch (error) { console.error(`flow check PR #${n}: ${error.message}`); code = 1; }
+  }
   return code;
 }
 
 async function checkOne(repo, number, { post, configFile }) {
-  let result, headSha;
+  let result, headSha, seen = null;
   try {
     const { ctx } = await gather(repo, number, { configText: configFile ? readFileSync(configFile, "utf8") : undefined });
     headSha = ctx.pr.headSha;
+    seen = commentState(ctx.comments);
     result = await evaluate(ctx);
   } catch (error) {
     // Fail closed: an error is a failing gate, never a skipped one.
@@ -209,6 +216,11 @@ async function checkOne(repo, number, { post, configFile }) {
       return 0;
     }
     headSha ??= current;
+    // Same for comments: an approval posted, edited or deleted while we were reading has its own queued run.
+    if (seen !== null && commentState((await pages(`repos/${repo}/issues/${number}/comments`)).items) !== seen) {
+      console.log("comments changed during the check; leaving it to the newer run");
+      return 0;
+    }
     const verdict = checkToPost(result);
     if (verdict) {
       await postCheck(repo, headSha, { ...verdict, summary });
@@ -219,6 +231,9 @@ async function checkOne(repo, number, { post, configFile }) {
   console.log(summary);
   return post ? 0 : result.ok ? 0 : 1;
 }
+
+/** Comments by people (not the gate's own dashboard): ids and edit times. */
+const commentState = (comments) => comments.filter((c) => c.user?.type !== "Bot").map((c) => `${c.id}:${c.updated_at}`).join(",");
 
 async function postCheck(repo, sha, { ok, title, summary }) {
   const clipped = summary.length > 60_000 ? `${summary.slice(0, 60_000)}\n\n… (truncated)` : summary;

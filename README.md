@@ -84,8 +84,8 @@ Tested on 2026-10-16 in a private throwaway repo: a ruleset requiring `flow` fro
 ### Limits, honestly
 
 - **Standard mode can be forged** by anyone who can push a workflow file (verified above).
-- **A shared commit can block the merge.** Once a commit has also been the head of a PR into another branch, GitHub stopped counting `flow` for its merge into main ("Required status check flow is expected"), even after that PR closed. Seen 3 of 3 times in the e2e test; the cause is inferred, not documented by GitHub. It fails safe. Push a new commit (an empty one keeps the ship approval); the dashboard says so when it applies.
-
+- **A shared commit can block the merge.** Once a commit has also been the head of a PR into another branch, GitHub stopped counting `flow` for its merge into main ("Required status check flow is expected"), even after that PR closed. Seen 3 of 3 times in the e2e test; the cause is inferred, not documented by GitHub. It fails safe. Push a new commit (an empty one keeps the ship approval); the dashboard says so while the other PR is open.
+- **Two PRs into two protected branches can't share a commit:** check runs belong to the commit, so their verdicts would overwrite each other. The gate blocks this.
 - The gate checks completeness and references, not quality. A test that exists and passes can still test the wrong thing; the independent challenge and verification, and the human at checkpoint 1, are what judge design and test quality.
 - Capacity numbers and eval counts are written by the agent. The gate demands sources and dates, and shows them on the approval card for a human to judge.
 - "Before implementation" is enforced locally (the edit hook), not in CI. CI can't know when code was written.

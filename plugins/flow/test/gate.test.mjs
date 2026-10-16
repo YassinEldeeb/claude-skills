@@ -384,11 +384,19 @@ describe("e2e findings (real GitHub sandbox, 2026-10-16)", () => {
     assert.ok(!/spec@\u200b/.test(out) && !/ship@\u200b/.test(out));
     assert.match(out, /an approver posts `\/flow approve T-1 spec@[0-9a-f]{24}`/);
     assert.ok(render(await evaluate(ctx(passing(task("medium", { title: "ping @acme/admins" }))))).includes("@\u200bacme"), "real mentions are still neutralized");
+    const tricky = render(await evaluate(ctx(passing(task("medium", { title: "`@org/admins` and ops@example.com" })))));
+    assert.ok(!tricky.includes("`@org") && !/[^\u200b]@org/.test(tricky.replace(/\\`/g, "`")), "a backticked mention is neutralized");
+    assert.ok(!tricky.includes("ops@example"), "an email doesn't autolink");
   });
   test("a head shared with a PR into another branch gets a note on what to do", async () => {
     const r = await evaluate({ ...ctx(passing(task("medium"))), headPrs: [{ number: 7, base: "main" }, { number: 3, base: "side" }] });
     assert.ok(r.unknowns.some((u) => u.includes("PR #3 (into side)") && u.includes("push a new commit")));
     assert.equal(r.ok, true, "a note, not a blocker");
+  });
+  test("a head shared with a PR into another protected branch blocks (the verdicts would overwrite each other)", async () => {
+    const config = { ...CONFIG, branches: ["main", "release"] };
+    const r = await evaluate({ ...ctx({ ...passing(task("medium")), config }), headPrs: [{ number: 5, base: "release" }] });
+    assert.ok(has(r, "PR #5 into release, another protected branch"));
   });
   test("a workflow_run judges every PR it lists, not just the first", () => {
     assert.deepEqual(prNumbersFromEvent("workflow_run", { workflow_run: { pull_requests: [{ number: 3 }, { number: 2 }, { number: 3 }] } }), [3, 2]);
