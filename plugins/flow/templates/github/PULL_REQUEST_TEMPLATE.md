@@ -1,8 +1,6 @@
-## Acceptance criteria and evidence
-<!-- Each criterion, and the test / eval / canary that proves it. -->
+Flow-Task: <!-- the task ID (e.g. MEM-12), or delete this line for a small change -->
 
-## Deviations from the approved design
-<!-- What differs from status.md "Approved", and who approved it. Write "none" if nothing. -->
+## What changed
 
-## Needs a human because
-<!-- Risks, blockers, 🔴 decisions. Write "none" if nothing; otherwise the flow check stays red until the `human-approved` label is added. -->
+## Evidence
+<!-- Small change: what you ran and what it showed. Task: the gate reads .flow/tasks/<ID>/task.json; summarize here for humans. -->

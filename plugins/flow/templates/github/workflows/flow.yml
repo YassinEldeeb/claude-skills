@@ -1,21 +1,36 @@
 name: flow
+# The flow gate. It runs from the BASE branch (pull_request_target, issue_comment) and only READS the PR through
+# the API, so a PR can't change the code or the config that judges it. Never check out or run the PR's code here.
+# Its result is the "flow" check run: make that a required check, with GitHub Actions as its source.
 on:
-  pull_request:
-    types: [opened, edited, synchronize, reopened, labeled, unlabeled]
+  pull_request_target:
+    types: [opened, edited, synchronize, reopened, ready_for_review]
+  issue_comment:
+    types: [created, edited, deleted]
   merge_group:
 permissions:
   contents: read
+  checks: write
+  pull-requests: write
+  issues: write
+concurrency:
+  group: flow-${{ github.event.pull_request.number || github.event.issue.number || github.ref }}
+  cancel-in-progress: true
 jobs:
-  flow:
+  flow-gate:
+    if: github.event_name != 'issue_comment' || (github.event.issue.pull_request && github.event.comment.user.type != 'Bot' && contains(github.event.comment.body, '/flow'))
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The base branch's gate code: the default for pull_request_target and issue_comment; the queue's base for merge_group.
+          ref: ${{ github.event.merge_group.base_sha || '' }}
+          sparse-checkout: .github/flow
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: node .github/flow/check.mjs
+      - run: node .github/flow/flow.mjs check --post
         env:
-          EVENT_NAME: ${{ github.event_name }}
-          ACTOR: ${{ github.event.pull_request.user.login }}
-          PR_BODY: ${{ github.event.pull_request.body }}
-          PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+          GITHUB_TOKEN: ${{ github.token }}
