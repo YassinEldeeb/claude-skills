@@ -71,11 +71,18 @@ for (const [clusterId, candidate] of Object.entries(CANDIDATES)) {
   const growth = sizeGrowth(baseline, tree, ["plugins/flow/skills/start/SKILL.md"]);
   let judgement, detail;
   if (testCase.kind === "deterministic") {
-    const target = runDeterministic(testCase, { baseline, candidate: tree });
-    judgement = judge({ target, growth });
-    const failsBase = target.arms.baseline.filter((r) => !r.ok).length, held = target.arms.candidate.filter((r) => r.heldOut);
-    detail = `baseline fails ${failsBase}/${target.arms.baseline.length} fixtures; candidate passes ${target.arms.candidate.filter((r) => r.ok).length}/${target.arms.candidate.length} (held-out bypasses ${held.filter((r) => r.ok).length}/${held.length})`;
-    results[clusterId] = { target, judgement };
+    // Every case for this cluster: the one the fix author saw, then four rounds written by independent authors and
+    // run once each before the author saw them (each round became development data for the next version).
+    const ids = ["no-merge-constraint", "no-merge-heldout", "no-merge-heldout-2", "no-merge-heldout-3", "no-merge-heldout-4"];
+    const rows = ids.map((id) => {
+      const target = runDeterministic(loadCase(join(plugin, "learn/cases", id)), { baseline, candidate: tree });
+      const j = judge({ target, growth });
+      const commands = target.arms.candidate.filter((r) => r.got !== undefined && !String(r.got).startsWith("active"));
+      return { id, target, j, line: `| ${id} | ${target.arms.baseline.filter((r) => r.ok).length}/${target.arms.baseline.length} | ${target.arms.candidate.filter((r) => r.ok).length}/${target.arms.candidate.length} | ${commands.filter((r) => r.ok).length}/${commands.length} | ${j.verdict} |` };
+    });
+    judgement = rows.every((r) => r.j.verdict === "enforced") ? rows[0].j : { verdict: "rejected", reasons: rows.filter((r) => r.j.verdict !== "enforced").map((r) => `${r.id}: ${r.j.reasons.join("; ")}`) };
+    detail = ["The current rule (v4) on every case. Rounds 1-4 were each unseen when first run: v1 43/62, v2 56/61, v3 53/54, v4 54/55.", "", "| Case | Baseline passes | Candidate passes | Of which command fixtures | Verdict |", "|---|---|---|---|---|", ...rows.map((r) => r.line), ""].join("\n");
+    results[clusterId] = { target: rows[0].target, judgement };
   } else {
     const calibration = await calibrate(testCase);
     const cost = estimate([testCase], { runs: 5, model: cluster?.models?.[0] ?? "claude-opus-5-5" });
@@ -85,7 +92,7 @@ for (const [clusterId, candidate] of Object.entries(CANDIDATES)) {
   out.push(`## ${clusterId}`, "", `**Signal:** ${cluster ? `${cluster.occurrences} correction(s) in ${cluster.sessions} session(s); synthetic: ${cluster.synthetic}` : "missing"}`, "",
     `**Root cause:** ${candidate.rootCause}`, "", `**Proposed improvement:** ${candidate.change}`, "",
     `**Regression case:** \`plugins/flow/learn/cases/${caseId}\` (${testCase.kind}, written by an independent agent from the synthetic description only)`, "",
-    `**Result:** ${judgement.verdict}. ${detail}${judgement.reasons?.length ? `. ${judgement.reasons.join("; ")}` : ""}`, "");
+    `**Result:** ${judgement.verdict}.`, "", detail, "", ...(judgement.reasons?.length ? [`Reasons: ${judgement.reasons.join("; ")}`, ""] : []));
   rmSync(tree, { recursive: true, force: true });
 }
 rmSync(baseline, { recursive: true, force: true });

@@ -3,8 +3,8 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-// v2: v1 passed 51/51 on fixtures its author had seen and 43/62 on the first unseen held-out set (rejected); v2 is
-// written against that set (now development data) and judged on a second unseen set.
+// v4. Unseen held-out rounds: v1 43/62, v2 56/61, v3 53/54 (each rejected: every fixture must pass). Each round then
+// became development data for the next version; v4 is judged on a fourth unseen set.
 export const NO_MERGE_RULE = {
   id: "no-merge",
   why: "no merging pull requests until the engineer says so",
@@ -14,17 +14,20 @@ export const NO_MERGE_RULE = {
     "\\b(wait|hold off)\\b[^.?!\\n]{0,25}\\bmerg(e|es|ing)\\b",
     "\\bmerg(e|es|ing) (is|are) off the table\\b",
     "\\b(leave|keep)\\b[^.?!\\n]{0,25}\\bunmerged\\b",
+    "\\bleave (the )?merg(e|es|ing) to me\\b|\\bi'?ll (do|handle) the merg",
+    "\\b(don'?t|do not|never|no)\\b[^.?!\\n]{0,30}\\b(land|push|commit)\\w*\\b[^.?!\\n]{0,20}\\b(on|to|onto|into) (main|master)\\b",
   ],
   release: [
     "\\b(you can|you may|go ahead and|feel free to|ok(ay)? to|please) merge\\b",
     "\\bmerge (it|the pr) now\\b",
     "\\bmerge away\\b",
     "\\bmerge when (ci is |it'?s |it is )?green\\b",
+    "\\bmerg(e|es|ing) (is|are) (fine|ok(ay)?|allowed)\\b|\\bgreen light to merge\\b",
   ],
   // Read-only commands that only print text mentioning a merge (no pipe or chaining into something that could run it).
   allow: [
     "^\\s*(grep|rg|ag|echo|printf|cat|less|head|tail|man)\\b[^|;&`$]*$",
-    "\\bgh\\b[^|;&]*\\bpr\\s+merge\\b[^|;&]*\\s(--help|-h)\\b[^|;&]*$",
+    "\\bgh\\b[^|;&]*\\bpr\\s+merge\\b[^|;&]*\\s(--help|-h|--disable-auto)\\b[^|;&]*$",
   ],
   blocks: [
     "\\bgh['\"]?\\s+(?:(?:-R|--repo)[=\\s]+\\S+\\s+)*['\"]?pr['\"]?\\s+(?:(?:-R|--repo)[=\\s]+\\S+\\s+)*['\"]?merge\\b",
@@ -35,7 +38,8 @@ export const NO_MERGE_RULE = {
     "/pulls/\\d+/merge\\b[\\s\\S]*\\bput\\b",
     "\\bgraphql\\b[\\s\\S]*@\\S*merge",
     "\\bhub\\s+merge\\b",
-    "\\bgit\\b[\\s\\S]*\\bpush\\b[\\s\\S]*[\\s:](refs/heads/)?(main|master)\\b(?!-)",
+    "\\bgit\\b[\\s\\S]*\\bpush\\b[\\s\\S]*[\\s:+](refs/heads/)?(main|master)\\b(?!-)",
+    "\\bgit\\s+(checkout|switch)\\s+(main|master)\\b[\\s\\S]*\\bgit\\b[\\s\\S]*\\bpush\\b",
   ],
 };
 
