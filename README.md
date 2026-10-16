@@ -92,6 +92,48 @@ Tested on 2026-10-16 in a private throwaway repo: a ruleset requiring `flow` fro
 - Deploy verification is repo-specific. The dashboard shows `deployed` only from GitHub deployment records; `flow.mjs rollout-ok` gives a deploy pipeline a hook.
 - Design and trade-offs: [docs/flow-2-design.md](docs/flow-2-design.md).
 
+### Learning from corrections (flow 2.1)
+
+Correct Claude once. flow records the correction, finds the reusable failure behind it, and helps you prove a fix before anyone else gets it: **Capture → Understand → Improve → Prove**.
+
+| Stage | How | Cost |
+|---|---|---|
+| **Capture** | `UserPromptSubmit` records corrections you type ("stop overengineering", "I said no merges", "why didn't you query the real data?"), and praise. `SessionEnd` derives counts from the local transcript: failing-test streaks, repeated commands, "done" with no test after the last edit. | No model calls; ~10–30 ms per prompt (measured) |
+| **Understand** | A deterministic worker clusters incidents by (category, owning skill section or rule). It writes a dossier per cluster, with a synthetic description and no engineer text. | Local |
+| **Improve** | `/flow:learn <cluster>`, run explicitly. It finds the root cause, an independent subagent writes regression cases (with held-out phrasings and bypass attempts), then the smallest fix is made in allowed files only. | Your session's tokens |
+| **Prove** | `flow-learn prove`. Enforcement runs the real hooks from the baseline and the candidate. Behavior runs `claude -p --plugin-dir` (real skill loading) N times per arm, and only with `--approve-spend --budget-usd`. | Free / budgeted |
+| **Propose** | One draft PR per cluster, only after the gate says `enforced` or `improved`. Rate-limited, synthetic text only. Never merged by the tool. | — |
+
+The effectiveness gate requires all of these:
+- the baseline reproduces the failure;
+- the scorer separates its known-good and known-bad end states;
+- the held-out phrasing improves beyond noise (90% interval);
+- no other case regresses;
+- tokens and skill size stay within budget;
+- results come from real plugin loading.
+
+Anything else is `cannot-reproduce`, `inconclusive`, `regressed` or `not-run`, and becomes a local review-only proposal.
+
+**Privacy:**
+- Only prompts an engineer typed are captured: Claude Code's `source: "user"`, or an attended session. `/loop`, SDK, headless and eval runs never count.
+- A field containing a secret is dropped, not redacted. Tool arguments, files and diffs are never stored.
+- Everything stays local (`~/.claude/flow-feedback`, mode 0600, 30-day retention), with a one-time notice.
+- `flow-learn status | inspect | delete | disable` are the engineer's controls; the hooks refuse to let an agent use them or touch the store.
+- A repo can require opt-in with `"learn": {"capture": "opt-in"}` in `.flow/config.json`.
+- There is no team aggregation yet: lessons reach the team only as reviewed PRs.
+
+**Safety boundaries:**
+- An improvement may change only skills, `templates/rules.md`, constraint rules (data) and regression cases. `propose` refuses gates, hook code, its own harness, workflows and config.
+- Its `gh` wrapper can't merge, approve, mark ready or write to the API.
+- Session constraints ("don't merge") are enforced by the Bash guard on a best-effort basis; GitHub's required checks remain the hard layer.
+
+```bash
+node plugins/flow/learn/cli.mjs report            # what flow learned, every number labelled measured/estimated/unavailable
+node docs/demo/flow-2.1/run.mjs                   # three incidents end to end (no model calls)
+python3 docs/demo/flow-2.1/live-capture.py        # capture inside a real interactive Claude Code session, at $0
+```
+Design: [docs/flow-2.1-design.md](docs/flow-2.1-design.md).
+
 ## ship: deadline mode
 
 ```bash

@@ -6,6 +6,7 @@
 import { existsSync, realpathSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative } from "node:path";
 import { approveLine, fileSignals } from "../gate/lib.mjs";
+import { home } from "../learn/store.mjs";
 import { block, branchTasks, currentBranch, loadFlow, readInput, repoRoot } from "./common.mjs";
 
 /** Resolve symlinks (macOS /var -> /private/var) even for a file that doesn't exist yet. */
@@ -17,6 +18,7 @@ try {
   const target = tool.file_path ?? tool.notebook_path;
   const cwd = input.cwd || process.env.CLAUDE_PROJECT_DIR || process.cwd();
   if (!target) process.exit(0);
+  if (real(isAbsolute(target) ? target : join(cwd, target)).startsWith(real(home()))) block("flow's local feedback store is the engineer's record; it is never edited by hand or by an agent.");
   const root = repoRoot(cwd);
   const flow = loadFlow(root);
   if (!flow) process.exit(0);

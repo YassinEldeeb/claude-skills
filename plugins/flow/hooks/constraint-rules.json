@@ -1,0 +1,4 @@
+{
+  "_doc": "Session constraints an engineer states in a prompt ('don't merge'), enforced by guard-bash.mjs while active (best effort; GitHub's required checks are the hard layer). A rule only ever restricts. phrases start it, release lifts it (both matched on engineer prompts only), blocks are Bash patterns refused while it is active, allow are exceptions. Changes arrive as reviewed flow-learn PRs labelled 'enforcement'.",
+  "rules": []
+}

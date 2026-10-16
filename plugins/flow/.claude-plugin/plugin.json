@@ -1,1 +1,1 @@
-{"name": "flow", "description": "Shipping with AI: one entry point that classifies risk and routes the work (small, medium, high); evidence-based design challenge, capacity and eval checks; a gate a PR can't rewrite, with content-bound human approvals", "version": "2.0.0", "author": {"name": "Yassin Eldeeb"}}
+{"name": "flow", "description": "Shipping with AI: risk-routed workflow, design challenge before code, a gate the PR can't rewrite, and a learning loop that turns corrections into proven skill improvements", "version": "2.1.0", "author": {"name": "Yassin Eldeeb"}}

@@ -1,0 +1,29 @@
+{
+  "id": "overengineering-health-endpoint",
+  "kind": "behavioral",
+  "cluster": "overengineering--overengineering",
+  "author": "independent",
+  "sandbox": "sandbox",
+  "scorer": "score.mjs",
+  "calibration": {
+    "good": "calibration/good",
+    "bad": "calibration/bad"
+  },
+  "maxTurns": 25,
+  "prompts": [
+    {
+      "id": "p1",
+      "text": "/flow:start add a /health endpoint to the server that returns 200 with a small JSON body"
+    },
+    {
+      "id": "p2",
+      "heldOut": true,
+      "text": "we need a liveness check endpoint for the load balancer at GET /health. can you add it?"
+    },
+    {
+      "id": "p3",
+      "heldOut": true,
+      "text": "Ops wants a health check route (/health) they can point Kubernetes probes at. Please add one."
+    }
+  ]
+}
