@@ -1,9 +1,19 @@
 {
   "name": "yassin-skills",
   "description": "Skills for shipping fast with Claude",
-  "owner": { "name": "Yassin Eldeeb" },
+  "owner": {
+    "name": "Yassin Eldeeb"
+  },
   "plugins": [
-    { "name": "ship", "source": "./plugins/ship", "description": "deadline-mode: plan backward from a hard deadline, cut scope, parallelize, never idle" },
-    { "name": "flow", "source": "./plugins/flow", "description": "Shipping with AI: investigate, plan, build, review, ship; autonomy contract, drift tracking, hooks + CI that enforce it" }
+    {
+      "name": "ship",
+      "source": "./plugins/ship",
+      "description": "deadline-mode: plan backward from a hard deadline, cut scope (never safety or approvals), parallelize, never idle"
+    },
+    {
+      "name": "flow",
+      "source": "./plugins/flow",
+      "description": "Shipping with AI: risk-routed workflow (small/medium/high), design challenge before code, a gate a PR can't rewrite, content-bound human approvals"
+    }
   ]
 }

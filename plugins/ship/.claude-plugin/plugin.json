@@ -1,1 +1,1 @@
-{ "name": "ship", "description": "deadline-mode: plan backward from a hard deadline, cut scope, parallelize, never idle", "version": "1.1.0", "author": { "name": "Yassin Eldeeb" } }
+{"name": "ship", "description": "deadline-mode: plan backward from a hard deadline, cut scope (never safety or approvals), parallelize, never idle", "version": "1.2.0", "author": {"name": "Yassin Eldeeb"}}

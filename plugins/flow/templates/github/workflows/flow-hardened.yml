@@ -1,0 +1,52 @@
+name: flow
+# The flow gate, hardened mode. Same gate as flow.yml, but the verdict is posted by YOUR GitHub App, not GitHub Actions:
+# any workflow can post a check as GitHub Actions, while only this job can get the App's key.
+# Setup (once, by a repo admin):
+#   1. Create a GitHub App (permissions: Checks write, Pull requests write, Issues write, Contents read, Deployments read);
+#      install it on this repo.
+#   2. Repository variable FLOW_APP_ID = the App id. Environment "flow-gate" with secret FLOW_APP_KEY = its private key,
+#      and deployment branches limited to the protected branch(es); with a merge queue, also allow gh-readonly-queue/*.
+#      (The gate ignores this environment's own deployment records when it reports "deployed".)
+#   3. Branch protection / ruleset: require the "flow" check with the App as its source; set "checkAppId" in .flow/config.json.
+# Never check out or run the PR's code here.
+on:
+  pull_request_target:
+    types: [opened, edited, synchronize, reopened, ready_for_review]
+  issue_comment:
+    types: [created, edited, deleted]
+  # Re-run when CI finishes, so its checks can count as evidence. /flow:install lists this repo's CI workflow names.
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+  merge_group:
+permissions:
+  contents: read
+jobs:
+  flow-gate:
+    if: github.event_name != 'issue_comment' || (github.event.issue.pull_request && github.event.comment.user.type != 'Bot' && contains(github.event.comment.body, '/flow'))
+    # Job-level, so a comment run that the `if` skips never touches a real one. A running gate job is never cancelled
+    # (a cancelled one turns the rollup red and can leave the dashboard half-updated); a pending one is replaced by a
+    # newer event's run, which reads fresh state when it starts.
+    concurrency:
+      group: flow-${{ github.event.pull_request.number || github.event.issue.number || github.event.workflow_run.pull_requests[0].number || github.ref }}
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: flow-gate
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.merge_group.base_sha || '' }}
+          sparse-checkout: .github/flow
+          persist-credentials: false
+      - uses: actions/create-github-app-token@v1
+        id: app
+        with:
+          app-id: ${{ vars.FLOW_APP_ID }}
+          private-key: ${{ secrets.FLOW_APP_KEY }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node .github/flow/flow.mjs check --post
+        env:
+          GITHUB_TOKEN: ${{ steps.app.outputs.token }}

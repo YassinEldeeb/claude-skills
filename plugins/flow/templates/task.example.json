@@ -1,0 +1,186 @@
+{
+  "schema": 1,
+  "id": "MEM-12",
+  "title": "Recent-first memory bootstrap for new users",
+  "tier": "high",
+  "signals": [
+    "worker",
+    "model-call",
+    "migration"
+  ],
+  "outcome": "A newly onboarded user gets useful memories from their last 14 days within 10 minutes, at under $0.05 per user; older history is processed in the background.",
+  "criteria": [
+    {
+      "id": "MEM-12.1",
+      "kind": "functional",
+      "severity": "critical",
+      "verify": "integration",
+      "behavior": "A new user's first agent turn after bootstrap can read at least one memory saved from their last 14 days."
+    },
+    {
+      "id": "MEM-12.2",
+      "kind": "safety",
+      "severity": "critical",
+      "verify": "failure_injection",
+      "behavior": "A rejected database commit never leaves a published memory file that looks committed."
+    },
+    {
+      "id": "MEM-12.3",
+      "kind": "safety",
+      "severity": "critical",
+      "verify": "integration",
+      "behavior": "An older task never resurrects a fact the user explicitly forgot."
+    },
+    {
+      "id": "MEM-12.4",
+      "kind": "operational",
+      "severity": "critical",
+      "verify": "canary",
+      "behavior": "p95 time from signup to first useful memory is under 10 minutes for the first 50 pilot users."
+    },
+    {
+      "id": "MEM-12.5",
+      "kind": "functional",
+      "severity": "normal",
+      "verify": "eval",
+      "behavior": "Saved memories match the gold set's expected facts (quality, not a release gate)."
+    }
+  ],
+  "decisions": [
+    {
+      "id": "D1",
+      "question": "Process full history up front, or recent-first with background backfill?",
+      "chosen": "recent-first (14 days), backfill later at low priority",
+      "why": "First useful memory in minutes instead of hours; 80% less work before the user sees value."
+    }
+  ],
+  "challenge": {
+    "simplest": "Reuse the existing per-message writer on the last 14 days only; no new service.",
+    "existingMayBeWrong": "The current writer assumes one source at a time; bootstrap reads many sources at once and may exhaust the model rate limit.",
+    "scale": "1,200 new users/week at p95 900 sources each: 1.1M source reads/week, about 40 model calls/user, 8 concurrent bootstraps.",
+    "failureModes": [
+      "Rate limits stretch bootstrap past the latency target",
+      "Backfill rewrites a fact the user forgot during bootstrap",
+      "Publication races the database commit and leaves a half-written file"
+    ],
+    "e2eProof": "Integration test on real Postgres that bootstraps a seeded user, then a failure-injection test that kills the commit after publish.",
+    "alternatives": [
+      {
+        "name": "full history first",
+        "why": "Simple, but hours before the first memory and 5x the cost for users who churn in week one"
+      },
+      {
+        "name": "recent-first + background backfill",
+        "why": "Value in minutes; the backfill can be throttled or dropped",
+        "chosen": true
+      },
+      {
+        "name": "existing saved memory + recent only, no backfill",
+        "why": "Cheapest; loses older context some users rely on"
+      }
+    ],
+    "assumptions": [
+      {
+        "text": "14 days of history holds enough to produce a useful memory for most users",
+        "status": "verified",
+        "evidence": "Sampled 40 pilot users: 36 had a usable fact within 14 days (notebook link in design.md)"
+      },
+      {
+        "text": "The customer cohort is about 1,200 new users/week",
+        "status": "unverified",
+        "blocks": "rollout"
+      }
+    ],
+    "review": "challenge-review.md"
+  },
+  "capacity": {
+    "workload": {
+      "users": {
+        "value": 1200,
+        "source": "estimate",
+        "basis": "new users per week from the sales forecast; unverified (see assumptions)"
+      },
+      "workPerUser": {
+        "value": "p50 220 / p95 900 sources",
+        "source": "measured",
+        "ref": "query in design.md over 31 pilot users",
+        "at": "2026-10-14"
+      }
+    },
+    "latency": {
+      "firstResult": {
+        "value": "p50 4 min / p95 9 min",
+        "source": "estimate",
+        "basis": "40 calls x 6 s at concurrency 8, from the measured call time"
+      },
+      "fullCompletion": {
+        "value": "about 3 h at low priority",
+        "source": "estimate",
+        "basis": "p95 sources x measured per-source time, throttled to 2 workers"
+      }
+    },
+    "cost": {
+      "perUser": {
+        "value": "$0.04",
+        "source": "estimate",
+        "basis": "40 calls x 2.5k tokens at the current model price"
+      },
+      "per1kUsers": {
+        "value": "$40",
+        "source": "estimate",
+        "basis": "perUser x 1000"
+      }
+    },
+    "cut80": "Yes: recent-first skips about 85% of sources before the first memory; the backfill is optional and throttled."
+  },
+  "integration": {
+    "owner": "builder-a",
+    "dependsOn": [
+      "MEM-11"
+    ],
+    "contract": "docs/memory-file-format.md",
+    "deployPlan": "Deploy the reader (MEM-11) first, then this writer behind the bootstrap switch; enable for 5 pilot users, then 50."
+  },
+  "branch": "you/mem-12-bootstrap",
+  "pr": 123,
+  "evidence": {
+    "MEM-12.1": [
+      "test:tests/memory/bootstrap.int.test.ts#first turn reads a recent memory"
+    ],
+    "MEM-12.2": [
+      "test:tests/memory/publication.fault.test.ts#rejected commit leaves nothing published"
+    ],
+    "MEM-12.3": [
+      "test:tests/memory/forget.int.test.ts#older task cannot resurrect a forgotten fact"
+    ],
+    "MEM-12.5": [
+      "eval:memory-gold-v3"
+    ],
+    "integration": [
+      "ci:e2e (reader + writer)"
+    ]
+  },
+  "evals": {
+    "gold": {
+      "good": 12,
+      "bad": 8,
+      "correct": 20,
+      "ref": "evals/memory/gold-v3/cases.json"
+    },
+    "results": {
+      "runs": 3,
+      "raw": {
+        "pass": 126,
+        "fail": 59
+      },
+      "productDefects": 6,
+      "safetyFailures": 0,
+      "evalDefects": 51,
+      "unknown": 2
+    },
+    "baseline": "main @ 86aa07b2, same model and config"
+  },
+  "log": [
+    "🟡 Kept the existing writer prompt; a rewrite is out of scope."
+  ]
+}

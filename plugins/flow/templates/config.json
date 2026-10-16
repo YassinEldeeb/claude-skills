@@ -1,0 +1,36 @@
+{
+  "schema": 1,
+  "_doc": "flow gate config. The gate reads it from the default branch, so a PR can't change who approves it or which rules judge it. Tailor the risk rules to this repo; changing this file is itself high risk. See the flow README for every key.",
+  "approvers": [],
+  "signers": [],
+  "agents": [],
+  "distinctApprover": true,
+  "branches": [],
+  "reviewBots": [],
+  "approvalBeforeBuild": ["high"],
+  "verify": {
+    "unit": {"paths": ["**/*.test.*", "**/*.spec.*", "**/test/**", "**/tests/**", "**/__tests__/**"], "checks": []},
+    "integration": {"paths": ["**/*.int.test.*", "**/integration/**"], "checks": []},
+    "failure_injection": {"paths": ["**/*.fault.test.*", "**/fault/**"], "checks": []},
+    "e2e": {"paths": ["**/*.e2e.*", "**/e2e/**"], "checks": []}
+  },
+  "minGold": 10,
+  "minEvalRuns": 3,
+  "minScorerAccuracy": 1,
+  "ignore": ["docs/**", "**/README*", "**/CHANGELOG*", "**/__tests__/**", "**/test/**", "**/tests/**", "**/*.test.*", "**/*.spec.*", "**/fixtures/**", ".flow/tasks/**"],
+  "codeFiles": ["**/*.ts", "**/*.tsx", "**/*.js", "**/*.jsx", "**/*.mjs", "**/*.cjs", "**/*.py", "**/*.go", "**/*.rb", "**/*.java", "**/*.kt", "**/*.rs", "**/*.php", "**/*.cs", "**/*.swift", "**/*.sql"],
+  "risk": [
+    {"id": "migration", "tier": "high", "why": "database schema or migration", "paths": ["**/migrations/**", "**/migrate/**", "**/*.sql", "**/schema.prisma", "**/schema.rb"]},
+    {"id": "auth", "tier": "high", "why": "authentication or authorization", "paths": ["**/auth/**", "**/*auth.*", "**/*permission*", "**/*rbac*", "**/*session*"]},
+    {"id": "billing", "tier": "high", "why": "billing or payments", "paths": ["**/billing/**", "**/*billing*", "**/*payment*", "**/*invoice*", "**/*stripe*", "**/*subscription*"]},
+    {"id": "privacy", "tier": "high", "why": "privacy, retention or encryption of user data", "paths": ["**/privacy/**", "**/*pii*", "**/*gdpr*", "**/*retention*", "**/*encrypt*"]},
+    {"id": "worker", "tier": "high", "capacity": true, "why": "new queue, worker or scheduled job", "lines": ["\\bnew\\s+Worker\\b", "\\b(Queue|Worker)\\s*\\(", "\\.enqueue\\(", "\\bqueue\\.add\\(", "\\bcron\\b", "@(Cron|Scheduled)\\b", "\\b(celery|sidekiq|bullmq)\\b"]},
+    {"id": "bulk", "tier": "high", "capacity": true, "why": "bulk job or backfill over existing data", "lines": ["\\bbackfill", "\\b(bulkWrite|insertMany|updateMany|deleteMany)\\b"]},
+    {"id": "model-call", "tier": "medium", "capacity": true, "why": "new model call", "lines": ["\\b(messages|completions|responses)\\.create\\(", "\\b(generateText|streamText|generateObject)\\(", "\\bnew\\s+(Anthropic|OpenAI)\\("]},
+    {"id": "external-api", "tier": "medium", "capacity": true, "why": "new call to an external API", "lines": ["\\bfetch\\(\\s*[`'\"]https?://", "\\baxios\\.(get|post|put|patch|delete)\\(\\s*[`'\"]https?://"]},
+    {"id": "prompt", "tier": "medium", "why": "model prompt or behavior", "paths": ["**/prompts/**", "**/*prompt*"]},
+    {"id": "deploy", "tier": "medium", "why": "deployment, infrastructure or CI", "paths": ["**/deploy/**", "**/infra/**", "**/terraform/**", "**/*.tf", "**/k8s/**", "**/helm/**", "**/Dockerfile", ".github/workflows/**", ".github/actions/**"]},
+    {"id": "dependencies", "tier": "medium", "why": "dependency or lockfile change (supply chain)", "paths": ["**/package-lock.json", "**/yarn.lock", "**/pnpm-lock.yaml", "**/bun.lock", "**/bun.lockb", "**/go.sum", "**/Cargo.lock", "**/poetry.lock", "**/Gemfile.lock", "**/requirements*.txt", "**/uv.lock"]},
+    {"id": "large", "tier": "medium", "why": "large change (500+ added lines outside tests and docs)", "minAdded": 500}
+  ]
+}

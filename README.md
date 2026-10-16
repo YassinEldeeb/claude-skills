@@ -9,32 +9,98 @@ claude plugin marketplace add YassinEldeeb/claude-skills
 ```bash
 claude plugin install flow@yassin-skills
 ```
-Then, in your repo: `/flow:install`
+Then, in your repo: `/flow:install`.
+
+flow scales the rigor to the risk. A typo ships with no ceremony. A new background pipeline gets its architecture, economics and test method challenged **before** the code exists, and can't merge without evidence and a human's approval of exactly what ships.
 
 | Command | What it does |
 |---|---|
-| `/flow:install` | Adds the rules, `status.md`, `decisions.md`, a PR template and a CI check to the repo |
-| `/flow:investigate` | Pin down the behavior with evidence; propose acceptance criteria |
-| `/flow:plan` | Simplest design, prior art, attacked by an independent reviewer |
-| `/flow:build` | Build to the failing tests, inside the approved boundaries |
-| `/flow:review` | Independent, adversarial review with evidence |
-| `/flow:ship` | PR with evidence, CI, merge, deploy, verify live |
-| `/flow:orchestrate` | Optional: coordinate several builders for long unattended runs |
+| `/flow:start <goal>` | **The entry point.** Classifies the risk (small / medium / high) and runs the right steps in order, stopping only at the human checkpoints |
+| `/flow:challenge` | Production evidence, the 7 design questions, alternatives, capacity and cost ("could we drop 80% of this?"), an independent attack |
+| `/flow:build` | Builds to failing tests inside the approved spec |
+| `/flow:verify` | Independent check of behavior, safety invariants, integration and eval validity |
+| `/flow:ship` | PR with evidence, gate green, merge, deploy through the pipeline, verify live |
+| `/flow:status` | Where each task really is: built → tested → integrated → merged → deployed → authorized |
+| `/flow:orchestrate` | Optional: several builders on dependent tasks, contracts first, one verified release |
+| `/flow:install` | Installs or upgrades flow in a repo (also migrates flow 1.x) |
 
-**Autonomy contract:** 🟢 do it · 🟡 log it in `decisions.md` · 🔴 ask first (architecture, product behavior, security/privacy, weaker criteria, big cost, irreversible).
+### How it works
 
-| Enforcement | How |
+| Tier | Decided by | Needs | Human |
+|---|---|---|---|
+| 🟢 Small | No risk rule matches the diff | A `## Evidence` section in the PR | Nothing |
+| 🟡 Medium | A medium rule (prompts, model calls, external APIs, deploy config, dependencies, a new module, 500+ lines) | `.flow/tasks/<ID>/task.json`: outcome, typed criteria with checked evidence, a light challenge, independent verification | Nothing, unless it lowers its tier or waives a step |
+| 🔴 High | A high rule (migrations, auth, billing, privacy, workers and queues, bulk jobs, the gate or any CI workflow) or a diff too large to scan | All of medium, plus `design.md`, the full challenge with an independent review, a capacity model with at least one measured number, a safety invariant | `spec@` before code, `ship@` before merge |
+
+- **The gate** (`.github/workflows/flow.yml`) runs on `pull_request_target` and `issue_comment`. That means it runs the protected branch's code and config, never the PR's. It reads the PR through the API and posts a `flow` check run plus one dashboard comment.
+- **The tier comes from the diff.** A builder can only raise it: lowering needs an `override` approval.
+- **Approvals are PR comments bound to content.** For example: `/flow approve MEM-12 spec@<hash>`.
+  - `spec@` covers `task.json`, `design.md` and the challenge review.
+  - `ship@` covers the PR's exact changes.
+  - Change what was approved and the approval lapses.
+  - They count only from `approvers` or `signers` in the protected branch's config, never from agents, bots or edited comments. In **signed mode**, only an SSH signature by a listed key counts, so approvals hold even when agents share a human's GitHub login.
+- **Evidence is checked, not claimed:**
+  - a test ref must be declared as a test, not be skipped, and live where that kind of test lives; the CI check that runs that kind (`config.verify.<kind>.checks`) must have passed on the head;
+  - a critical safety invariant can't be proven by a unit test;
+  - an eval counts only after its scorer passes a gold set that's already on the protected branch;
+  - a dependency counts only once its own PR merged.
+- **It fails closed:** missing or invalid config or task, an unknown schema, an API error, or a diff too large to list all mean red.
+
+### What enforces what
+
+| Layer | Strength | Bypass needs |
+|---|---|---|
+| `flow` required check, **hardened mode** (your App posts it; key in an environment limited to the protected branch) | Hard | Repo-admin rights, or a human's approval |
+| `flow` required check, standard mode (GitHub Actions posts it) | Hard against mistakes. A deliberately malicious agent with write access could forge a check from a workflow it adds. | That agent pushing a workflow file. Deny agents the `workflow` scope: a same-repo PR's workflow can ask for `checks: write` whatever the default token is |
+| Signed approvals | Hard, even with a shared GitHub login | The human's signing key (prefer one that needs a touch) |
+| Login approvals | Hard only if agents have their own GitHub identity | The approver's GitHub session |
+| Hooks (plugin) | Best effort | Ignoring them. They hold high-risk code until the spec is approved, and refuse self-approval, `--admin` merges and protection changes |
+| Rules in CLAUDE.md / AGENTS.md | Advisory | Nothing |
+
+**To make it hard** (`node .github/flow/flow.mjs doctor` checks most of this):
+1. Make `flow` a required check, pinned to its source app.
+2. Require branches to be up to date before merging.
+3. Turn on enforce admins, with no agent in any bypass list.
+4. Give agents a token without admin or `workflow` scope; this is what stops a PR from adding a workflow that posts a fake `flow`.
+5. Set the default workflow token to read-only, so existing workflows that run PR code can't post checks unless they ask.
+6. Use signed approvals, or a separate agent identity listed in `agents`.
+
+### Verified on real GitHub
+
+Tested on 2026-10-16 in a private throwaway repo: a ruleset requiring `flow` from GitHub Actions, no bypass actors, standard mode.
+
+| Test | Result |
 |---|---|
-| **Hook** (plugin, best effort) | Each session starts with `status.md`, unsettled 🔴 decisions and unapproved drift · `gh pr merge` is refused while one is open (fails open if the hook crashes) |
-| **CI** (`flow` check, hard gate once required) | Fails on an unsettled 🔴, unapproved drift, an empty PR template, or "needs a human" without the `human-approved` label |
-| **Usage guard** (plugin) | Idle over 1 h with a big context → blocks the next message once and suggests `/compact` (the cache expired, so it would re-pay everything) · over 500k tokens → warns |
-| **Advisory** | The rules in CLAUDE.md / AGENTS.md |
+| A migration PR with no task | `flow` red; GitHub refuses the merge, `--admin` included |
+| A high-risk PR | Merges only after the `spec@` and then the `ship@` approval; each comment re-runs the gate |
+| Editing an approval comment | The approval stops counting; red again; merge refused |
+| Pushing a change after `ship@` | The ship approval lapses; after a clean rebase onto main, it still holds (same changes) |
+| CI finishing | `workflow_run` re-runs the gate, so CI checks count as evidence without a comment |
+| The same commit as a PR into an unprotected branch | Posts no `flow` check, so it can't turn the main PR green |
+| Signed mode | Only the configured key's signature counts; unsigned and wrong-key approvals are ignored with the reason |
+| A PR workflow posting a fake `flow: pass` | **Forgery works in standard mode**: the PR became mergeable and merged. This is the documented limit; deny agents the `workflow` scope, or use hardened mode |
+| Hardened mode (App) | **Not tested**: needs a GitHub App and its key |
 
-Make `flow` a required check in branch protection, and add CODEOWNERS on `.github/flow/**`, `decisions.md` and `status.md` so a PR can't approve its own gate.
+### Limits, honestly
+
+- **Standard mode can be forged** by anyone who can push a workflow file (verified above).
+- **A shared commit can block the merge.** Once a commit has also been the head of a PR into another branch, GitHub stopped counting `flow` for its merge into main ("Required status check flow is expected"), even after that PR closed. Seen 3 of 3 times in the e2e test; the cause is inferred, not documented by GitHub. It fails safe. Push a new commit (an empty one keeps the ship approval); the dashboard says so while the other PR is open.
+- **Two PRs into two protected branches can't share a commit:** check runs belong to the commit, so their verdicts would overwrite each other. The gate blocks this.
+- The gate checks completeness and references, not quality. A test that exists and passes can still test the wrong thing; the independent challenge and verification, and the human at checkpoint 1, are what judge design and test quality.
+- Capacity numbers and eval counts are written by the agent. The gate demands sources and dates, and shows them on the approval card for a human to judge.
+- "Before implementation" is enforced locally (the edit hook), not in CI. CI can't know when code was written.
+- Deploy verification is repo-specific. The dashboard shows `deployed` only from GitHub deployment records; `flow.mjs rollout-ok` gives a deploy pipeline a hook.
+- Design and trade-offs: [docs/flow-2-design.md](docs/flow-2-design.md).
 
 ## ship: deadline mode
 
 ```bash
 claude plugin install ship@yassin-skills
 ```
-`/ship:deadline-mode <goal> by <time>`
+`/ship:deadline-mode <goal> by <time>`. It plans backward from a fixed deadline, cuts scope (never safety, criteria or approvals), parallelizes and never idles.
+
+## Development
+
+```bash
+node --test 'plugins/flow/test/*.test.mjs'
+```

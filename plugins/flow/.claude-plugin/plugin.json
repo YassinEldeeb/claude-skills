@@ -1,1 +1,1 @@
-{"name": "flow", "description": "Shipping with AI: investigate \u2192 plan \u2192 build \u2192 review \u2192 ship, an autonomy contract, drift tracking, and hooks + CI that enforce it", "version": "1.1.0", "author": {"name": "Yassin Eldeeb"}}
+{"name": "flow", "description": "Shipping with AI: one entry point that classifies risk and routes the work (small, medium, high); evidence-based design challenge, capacity and eval checks; a gate a PR can't rewrite, with content-bound human approvals", "version": "2.0.0", "author": {"name": "Yassin Eldeeb"}}

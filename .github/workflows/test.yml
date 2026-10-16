@@ -1,0 +1,24 @@
+name: test
+on:
+  pull_request:
+  push:
+    branches: [master]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Syntax check every script
+        run: for f in $(git ls-files '*.mjs'); do node --check "$f" || exit 1; done
+      - name: JSON files parse
+        run: for f in $(git ls-files '*.json'); do node -e "JSON.parse(require('fs').readFileSync('$f','utf8'))" || { echo "$f"; exit 1; }; done
+      - name: Tests
+        run: node --test 'plugins/flow/test/*.test.mjs'
