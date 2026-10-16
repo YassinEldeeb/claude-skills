@@ -3,24 +3,39 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
+// v2: v1 passed 51/51 on fixtures its author had seen and 43/62 on the first unseen held-out set (rejected); v2 is
+// written against that set (now development data) and judged on a second unseen set.
 export const NO_MERGE_RULE = {
   id: "no-merge",
   why: "no merging pull requests until the engineer says so",
   covers: ["merge"],
   phrases: [
     "\\b(don'?t|do not|never|no)\\b[^.?!\\n]{0,40}\\bmerg(e|es|ing)\\b",
-    "\\bhold off on merging\\b",
-    "\\b(leave|keep) (it|the pr|this) unmerged\\b",
+    "\\b(wait|hold off)\\b[^.?!\\n]{0,25}\\bmerg(e|es|ing)\\b",
+    "\\bmerg(e|es|ing) (is|are) off the table\\b",
+    "\\b(leave|keep)\\b[^.?!\\n]{0,25}\\bunmerged\\b",
   ],
   release: [
     "\\b(you can|you may|go ahead and|feel free to|ok(ay)? to|please) merge\\b",
     "\\bmerge (it|the pr) now\\b",
+    "\\bmerge away\\b",
+    "\\bmerge when (ci is |it'?s |it is )?green\\b",
+  ],
+  // Read-only commands that only print text mentioning a merge (no pipe or chaining into something that could run it).
+  allow: [
+    "^\\s*(grep|rg|ag|echo|printf|cat|less|head|tail|man)\\b[^|;&`$]*$",
+    "\\bgh\\b[^|;&]*\\bpr\\s+merge\\b[^|;&]*\\s(--help|-h)\\b[^|;&]*$",
   ],
   blocks: [
-    "\\bgh\\b[\\s\\S]*\\bpr\\s+merge\\b",
+    "\\bgh['\"]?\\s+(?:(?:-R|--repo)[=\\s]+\\S+\\s+)*['\"]?pr['\"]?\\s+(?:(?:-R|--repo)[=\\s]+\\S+\\s+)*['\"]?merge\\b",
+    "\\bgh\\s+alias\\s+set\\b[\\s\\S]*\\bpr\\s+merge\\b",
+    "(-X|--method|--request|-[a-zA-Z]+X)[\\s=]*['\"]?put\\b[\\s\\S]*/pulls/\\d+/merge\\b",
     "\\b(mergePullRequest|enablePullRequestAutoMerge)\\b",
-    "(-X|--method|--request)[\\s=]*['\"]?PUT\\b[\\s\\S]*/pulls/\\d+/merge\\b",
-    "/pulls/\\d+/merge\\b[\\s\\S]*(-X|--method|--request)[\\s=]*['\"]?PUT\\b",
+    "\\bput\\b[\\s\\S]*/pulls/\\d+/merge\\b",
+    "/pulls/\\d+/merge\\b[\\s\\S]*\\bput\\b",
+    "\\bgraphql\\b[\\s\\S]*@\\S*merge",
+    "\\bhub\\s+merge\\b",
+    "\\bgit\\b[\\s\\S]*\\bpush\\b[\\s\\S]*[\\s:](refs/heads/)?(main|master)\\b(?!-)",
   ],
 };
 

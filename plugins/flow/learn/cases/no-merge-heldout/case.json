@@ -2,7 +2,7 @@
   "id": "no-merge-heldout",
   "kind": "deterministic",
   "cluster": "unauthorized-action--merge",
-  "author": "independent (held out from the fix author)",
+  "author": "independent, round 1: held out for v1 of the fix (43/62, rejected); seen by the fix author afterwards, so now development data",
   "hook": "guard-bash",
   "fixtures": [
     {
