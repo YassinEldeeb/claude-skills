@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, test } from "node:test";
-import { approveLine, checkToPost, diffHash, evaluate, globToRegExp, parseUnifiedDiff, render, signedMessage, sshVerifier } from "../gate/lib.mjs";
+import { approveLine, checkToPost, diffHash, evaluate, globToRegExp, parseUnifiedDiff, prNumbersFromEvent, render, signedMessage, sshVerifier } from "../gate/lib.mjs";
 import { CONFIG, comment, ctx, green, hashOf, task, taskFiles } from "./fixtures.mjs";
 
 const has = (result, text) => result.blockers.some((b) => b.includes(text));
@@ -374,5 +374,35 @@ describe("fresh-eyes review fixes", () => {
   test("a kind with no configured CI check can't prove a critical criterion", async () => {
     const config = { ...CONFIG, verify: { ...CONFIG.verify, integration: { paths: ["**/*.int.test.*"], checks: [] } } };
     assert.ok(has(await evaluate(ctx({ ...passing(task("medium")), config })), "names no CI check"));
+  });
+});
+
+describe("e2e findings (real GitHub sandbox, 2026-10-16)", () => {
+  test("approval lines stay copyable: no zero-width space inside spec@<hash>, code spans intact", async () => {
+    const t = task("high");
+    const out = render(await evaluate(ctx(passing(t))));
+    assert.ok(!/spec@\u200b/.test(out) && !/ship@\u200b/.test(out));
+    assert.match(out, /an approver posts `\/flow approve T-1 spec@[0-9a-f]{24}`/);
+    assert.ok(render(await evaluate(ctx(passing(task("medium", { title: "ping @acme/admins" }))))).includes("@\u200bacme"), "real mentions are still neutralized");
+  });
+  test("a head shared with a PR into another branch gets a note on what to do", async () => {
+    const r = await evaluate({ ...ctx(passing(task("medium"))), headPrs: [{ number: 7, base: "main" }, { number: 3, base: "side" }] });
+    assert.ok(r.unknowns.some((u) => u.includes("PR #3 (into side)") && u.includes("push a new commit")));
+    assert.equal(r.ok, true, "a note, not a blocker");
+  });
+  test("a workflow_run judges every PR it lists, not just the first", () => {
+    assert.deepEqual(prNumbersFromEvent("workflow_run", { workflow_run: { pull_requests: [{ number: 3 }, { number: 2 }, { number: 3 }] } }), [3, 2]);
+    assert.deepEqual(prNumbersFromEvent("issue_comment", { issue: { number: 9, pull_request: {} } }), [9]);
+    assert.deepEqual(prNumbersFromEvent("issue_comment", { issue: { number: 9 } }), []);
+    assert.deepEqual(prNumbersFromEvent("pull_request_target", { pull_request: { number: 4 } }), [4]);
+  });
+  test("workflow templates queue gate runs (never cancel) and never run PR code", () => {
+    for (const name of ["flow.yml", "flow-hardened.yml"]) {
+      const text = readFileSync(new URL(`../templates/github/workflows/${name}`, import.meta.url), "utf8");
+      assert.ok(!/cancel-in-progress:\s*true/.test(text), `${name}: cancel-in-progress must be false`);
+      assert.match(text, /\n {4}concurrency:/, `${name}: concurrency is job-level`);
+      assert.ok(!/github\.event\.pull_request\.head\.(sha|ref)/.test(text), `${name}: never check out the PR head`);
+      assert.match(text, /comment\.user\.type != 'Bot'/, `${name}: bot comments don't trigger runs`);
+    }
   });
 });

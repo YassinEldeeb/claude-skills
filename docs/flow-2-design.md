@@ -155,6 +155,15 @@ An independent reviewer attacked the first draft of this design (6 blockers, 18 
 | m25–m35 | Re-runs, Bash writes, version drift, logins, Markdown injection, override visibility, overlapping PRs, deadline waivers, production access, decisions, comment filtering | Config read through the API at run time; Bash writes labeled L; versions surfaced; `login#id`; all task text escaped; override shown as a banner and its own verb; overlapping PRs not built (limit); typed `waivers` need approval; the challenge skill names the human-export path; decisions are typed in task.json; the job's `if` filters comments |
 | 36 | Use native reviews, not comment parsing | Not adopted as the default: native reviews can't separate a human from an agent that shares their login (the owner's setup), and GitHub forbids self-approval. Signed comments can. `reviewBots` adopts native reviews where a separate bot identity exists. |
 
+## 10. Live verification (real GitHub, 2026-10-16)
+
+A private throwaway repo ran the gate from this PR with a ruleset requiring `flow` from GitHub Actions (no bypass actors). The results are in the README's "Verified on real GitHub" table. Defects found and fixed in this PR:
+- The escaping put a zero-width space inside `spec@<hash>`: a hash copied from the table failed silently, and the blocker's code span broke. Only mention-shaped `@` is neutralized now.
+- A `workflow_run` judged only the first PR it lists. It now judges every one.
+- `cancel-in-progress: true` cancelled gate jobs and turned the PR's rollup red. Runs now queue.
+
+Observed GitHub behavior, now documented: a commit that was also the head of a PR into another branch stops satisfying the required `flow` check for its merge into main (3 of 3 times). It fails safe, and the dashboard points to the fix (a new commit). Hardened mode was not tested (no GitHub App available).
+
 ## 9. Fresh-eyes review of the build: findings and fixes
 
 A second independent reviewer audited the built diff (25 findings). The material ones:

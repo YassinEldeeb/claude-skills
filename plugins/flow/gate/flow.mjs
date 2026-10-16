@@ -5,7 +5,7 @@ import { execFileSync } from "node:child_process";
 import { appendFileSync, existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-  FLOW_VERSION, approveLine, configErrors, detectSignals, evaluate, parseApprovals, parseUnifiedDiff, checkToPost, render, signedMessage, specDocPaths, specHash, sshVerifier, taskErrors,
+  FLOW_VERSION, approveLine, configErrors, detectSignals, evaluate, parseApprovals, parseUnifiedDiff, checkToPost, prNumbersFromEvent, render, signedMessage, specDocPaths, specHash, sshVerifier, taskErrors,
 } from "./lib.mjs";
 
 const USAGE = `flow ${FLOW_VERSION}
@@ -132,6 +132,7 @@ async function gather(repo, number, { configText } = {}) {
     ...statuses.map((s) => ({ name: s.context, status: s.state === "pending" ? "in_progress" : "completed", conclusion: s.state === "pending" ? null : s.state === "success" ? "success" : "failure", started_at: s.updated_at })),
   ].sort((a, b) => String(a.started_at ?? "").localeCompare(String(b.started_at ?? "")));
   ctx.baseRoot = Array.isArray(root) ? root.map((entry) => entry.name) : null;
+  ctx.headPrs = ((await api(`repos/${repo}/commits/${head}/pulls?per_page=100`).catch(() => null)) ?? []).map((p) => ({ number: p.number, base: p.base?.ref }));
   ctx.deployments = [];
   if (pr.merged && pr.merge_commit_sha) {
     for (const d of await api(`repos/${repo}/deployments?sha=${pr.merge_commit_sha}&per_page=20`).catch(() => [])) {
@@ -172,7 +173,7 @@ async function check() {
   const configFile = opt("config");
   if (post && configFile) throw new Error("--config is for local dry runs; the posted gate always reads the protected branch's config");
   const repo = opt("repo") || process.env.GITHUB_REPOSITORY || repoFromGit();
-  let number = opt("pr") ? Number(opt("pr")) : undefined;
+  const number = opt("pr") ? Number(opt("pr")) : undefined;
   const eventName = process.env.GITHUB_EVENT_NAME;
   const event = process.env.GITHUB_EVENT_PATH ? JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, "utf8")) : {};
   if (eventName === "merge_group") {
@@ -181,10 +182,15 @@ async function check() {
     return 0;
   }
   // workflow_run: a CI workflow finished, so its checks can now count as evidence (fork PRs carry no PR list here).
-  if (!number) number = event.pull_request?.number ?? (event.issue?.pull_request ? event.issue.number : undefined) ?? event.workflow_run?.pull_requests?.[0]?.number;
-  if (!number && eventName === "workflow_run") { console.log("workflow_run without a same-repo PR: nothing to judge"); return 0; }
-  if (!repo || !number) throw new Error("no PR to check: pass --pr N (and --repo owner/name outside a GitHub checkout)");
+  const numbers = number ? [number] : prNumbersFromEvent(eventName, event);
+  if (!numbers.length && eventName === "workflow_run") { console.log("workflow_run without a same-repo PR: nothing to judge"); return 0; }
+  if (!repo || !numbers.length) throw new Error("no PR to check: pass --pr N (and --repo owner/name outside a GitHub checkout)");
+  let code = 0;
+  for (const n of numbers) code = Math.max(code, await checkOne(repo, n, { post, configFile }));
+  return code;
+}
 
+async function checkOne(repo, number, { post, configFile }) {
   let result, headSha;
   try {
     const { ctx } = await gather(repo, number, { configText: configFile ? readFileSync(configFile, "utf8") : undefined });

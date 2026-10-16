@@ -39,7 +39,7 @@ export const substantive = (value) => str(value) && !PLACEHOLDER.test(value.trim
 const lower = (value) => String(value ?? "").toLowerCase();
 /** Text from task files shown in Markdown: no links, mentions, HTML or table breaks. */
 const esc = (value) => String(value ?? "").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/[\\`*_[\]|#~]/g, "\\$&")
-  .replace(/@/g, "@\u200b").replace(/:\/\//g, ":\u200b//").replace(/www\./gi, "www\u200b.").replace(/[\r\n]+/g, " ");
+  .replace(/(^|[^\w`])@(?=[A-Za-z0-9])/g, "$1@\u200b").replace(/:\/\//g, ":\u200b//").replace(/www\./gi, "www\u200b.").replace(/[\r\n]+/g, " ");
 /** A line made of gate text and task text: escape it all, then restore the approval lines the gate itself quotes. */
 const escLine = (line) => esc(line).replace(/\\`(\/flow approve [A-Z][A-Z0-9]*-\d+ (?:spec|ship|override)@[0-9a-f]{24})\\`/g, "`$1`");
 /** Repo paths taken from task data: relative, no empty, "." or ".." segments (they could reach other API endpoints). */
@@ -485,6 +485,10 @@ export async function evaluate(ctx) {
   }
   const mode = (config.signers ?? []).length ? "signed" : "login";
   const shipHash = diffHash(ctx.files);
+  // Seen in the e2e test: once a commit has been the head of a PR into another branch, GitHub's ruleset may stop
+  // counting the "flow" check for this PR's merge ("Required status check flow is expected"). It fails safe; a new commit clears it.
+  const shared = (ctx.headPrs ?? []).filter((p) => p.number !== ctx.pr.number && p.base !== ctx.pr.base);
+  if (shared.length) unknowns.push(`this commit is also the head of ${shared.map((p) => `PR #${p.number} (into ${p.base})`).join(", ")}: if GitHub says the required "flow" check is "expected" although it passed, push a new commit (an empty one keeps the ship approval)`);
 
   const signals = detectSignals(ctx.files, config, ctx.baseRoot);
   const detectedTier = maxTier(signals.map((s) => s.tier));
@@ -734,6 +738,14 @@ export function checkToPost(result) {
   if (result.skipped) return null;
   const title = result.error ? "flow: error" : result.ok ? `flow: pass${result.tier ? ` (${result.tier})` : ""}` : `flow: ${result.blockers.length} blocker${result.blockers.length === 1 ? "" : "s"}`;
   return { ok: !!result.ok, title };
+}
+
+/** The PRs an Actions event asks the gate to judge. A workflow_run can list several PRs that share its head commit. */
+export function prNumbersFromEvent(eventName, event) {
+  if (event?.pull_request?.number) return [event.pull_request.number];
+  if (event?.issue?.pull_request) return [event.issue.number];
+  if (eventName === "workflow_run") return [...new Set((event?.workflow_run?.pull_requests ?? []).map((pr) => pr.number))];
+  return [];
 }
 
 // ---------- rendering ----------

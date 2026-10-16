@@ -65,7 +65,26 @@ flow scales the rigor to the risk. A typo ships with no ceremony. A new backgrou
 5. Set the default workflow token to read-only, so existing workflows that run PR code can't post checks unless they ask.
 6. Use signed approvals, or a separate agent identity listed in `agents`.
 
+### Verified on real GitHub
+
+Tested on 2026-10-16 in a private throwaway repo: a ruleset requiring `flow` from GitHub Actions, no bypass actors, standard mode.
+
+| Test | Result |
+|---|---|
+| A migration PR with no task | `flow` red; GitHub refuses the merge, `--admin` included |
+| A high-risk PR | Merges only after the `spec@` and then the `ship@` approval; each comment re-runs the gate |
+| Editing an approval comment | The approval stops counting; red again; merge refused |
+| Pushing a change after `ship@` | The ship approval lapses; after a clean rebase onto main, it still holds (same changes) |
+| CI finishing | `workflow_run` re-runs the gate, so CI checks count as evidence without a comment |
+| The same commit as a PR into an unprotected branch | Posts no `flow` check, so it can't turn the main PR green |
+| Signed mode | Only the configured key's signature counts; unsigned and wrong-key approvals are ignored with the reason |
+| A PR workflow posting a fake `flow: pass` | **Forgery works in standard mode**: the PR became mergeable and merged. This is the documented limit; deny agents the `workflow` scope, or use hardened mode |
+| Hardened mode (App) | **Not tested**: needs a GitHub App and its key |
+
 ### Limits, honestly
+
+- **Standard mode can be forged** by anyone who can push a workflow file (verified above).
+- **A shared commit can block the merge.** Once a commit has also been the head of a PR into another branch, GitHub stopped counting `flow` for its merge into main ("Required status check flow is expected"), even after that PR closed. Seen 3 of 3 times in the e2e test; the cause is inferred, not documented by GitHub. It fails safe. Push a new commit (an empty one keeps the ship approval); the dashboard says so when it applies.
 
 - The gate checks completeness and references, not quality. A test that exists and passes can still test the wrong thing; the independent challenge and verification, and the human at checkpoint 1, are what judge design and test quality.
 - Capacity numbers and eval counts are written by the agent. The gate demands sources and dates, and shows them on the approval card for a human to judge.

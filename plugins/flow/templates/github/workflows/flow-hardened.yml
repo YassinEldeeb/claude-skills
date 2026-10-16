@@ -24,10 +24,12 @@ permissions:
 jobs:
   flow-gate:
     if: github.event_name != 'issue_comment' || (github.event.issue.pull_request && github.event.comment.user.type != 'Bot' && contains(github.event.comment.body, '/flow'))
-    # Job-level, so a comment run that the `if` skips never cancels a real gate run.
+    # Job-level, so a comment run that the `if` skips never queues behind or cancels a real one. Queue, never cancel:
+    # a cancelled gate job turns the PR's check rollup red and can leave the dashboard half-updated; the newest queued
+    # run always judges the latest state.
     concurrency:
       group: flow-${{ github.event.pull_request.number || github.event.issue.number || github.event.workflow_run.pull_requests[0].number || github.ref }}
-      cancel-in-progress: true
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: flow-gate
