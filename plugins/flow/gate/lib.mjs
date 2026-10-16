@@ -24,7 +24,8 @@ export const GATE_CHECKS = ["flow", "flow-gate"];
 
 // Rules the config can't remove: the gate protects itself, and what can't be scanned is never small.
 export const BUILTIN_RULES = [
-  { id: "flow-gate", tier: "high", why: "changes the flow gate or its config", paths: [".github/flow/**", ".github/workflows/flow.yml", ".flow/config.json"] },
+  // Any workflow can post check runs, so every workflow and action change is a gate change.
+  { id: "flow-gate", tier: "high", why: "changes the flow gate, its config, or CI workflows (which can post checks)", paths: [".github/flow/**", ".github/workflows/**", ".github/actions/**", ".flow/config.json"] },
   { id: "unscanned", tier: "high", why: "part of the diff is binary or too large to scan for risk patterns" },
   { id: "new-module", tier: "medium", why: "adds a new top-level directory" },
 ];
@@ -34,10 +35,18 @@ export const maxTier = (tiers) => TIERS[Math.max(0, ...tiers.map(tierRank))];
 const str = (value) => typeof value === "string" && value.trim().length > 0;
 const PLACEHOLDER = /^(n\/?a|none|tbd|todo|\?+|-+|\.+|<.*>)$/i;
 /** Free text that says something: not empty, not a placeholder, not one word. */
-const substantive = (value) => str(value) && !PLACEHOLDER.test(value.trim()) && value.trim().length >= 12;
+export const substantive = (value) => str(value) && !PLACEHOLDER.test(value.trim()) && value.trim().length >= 12;
 const lower = (value) => String(value ?? "").toLowerCase();
 /** Text from task files shown in Markdown: no links, mentions, HTML or table breaks. */
-const esc = (value) => String(value ?? "").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/[\\`*_[\]|#]/g, "\\$&").replace(/@/g, "@\u200b").replace(/\n/g, " ");
+const esc = (value) => String(value ?? "").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/[\\`*_[\]|#~]/g, "\\$&")
+  .replace(/@/g, "@\u200b").replace(/:\/\//g, ":\u200b//").replace(/www\./gi, "www\u200b.").replace(/[\r\n]+/g, " ");
+/** A line made of gate text and task text: escape it all, then restore the approval lines the gate itself quotes. */
+const escLine = (line) => esc(line).replace(/\\`(\/flow approve [A-Z][A-Z0-9]*-\d+ (?:spec|ship|override)@[0-9a-f]{24})\\`/g, "`$1`");
+/** Repo paths taken from task data: relative, no empty, "." or ".." segments (they could reach other API endpoints). */
+export const safePath = (path) => typeof path === "string" && path.length > 0 && path.length < 500 && !path.startsWith("/") && !/[\\?#%\0]/.test(path)
+  && path.split("/").every((segment) => segment !== "" && segment !== "." && segment !== "..");
+/** The verdict is the last non-empty line, as the skills say. */
+const lastLineVerdict = (text) => /^\s*verdict:\s*pass\b/i.test((text ?? "").trim().split("\n").filter((line) => line.trim()).at(-1) ?? "");
 
 // ---------- globs and hashing ----------
 
@@ -77,7 +86,7 @@ export function specHash(task, docs = {}) {
 
 /** Hash of the PR's changes against its merge base: survives a clean "Update branch", changes with any edit. */
 export const diffHash = (files) => sha([...files].sort((a, b) => a.filename.localeCompare(b.filename))
-  .map((f) => `${f.filename}\0${f.previous_filename ?? ""}\0${f.status}\0${typeof f.patch === "string" ? f.patch : `blob:${f.sha ?? ""}`}`).join("\n"));
+  .map((f) => `${f.filename}\0${f.previous_filename ?? ""}\0${f.status}\0${typeof f.patch === "string" ? changedLines(f.patch).join("\n") : `blob:${f.sha ?? ""}`}`).join("\n"));
 
 export const approveLine = (id, kind, hash) => `/flow approve ${id} ${kind}@${hash}`;
 /** What a signer signs (ssh-keygen -Y sign -n flow): the repo is included so a signature can't be replayed elsewhere. */
@@ -128,16 +137,23 @@ export const allRules = (config) => [...BUILTIN_RULES, ...(config.risk ?? [])];
 export function parseUnifiedDiff(text) {
   const files = [];
   let file = null;
+  let inHunk = false;
+  const unquote = (name) => name.startsWith('"') ? JSON.parse(name) : name;
   for (const line of text.split("\n")) {
-    const start = /^diff --git a\/(.+) b\/(.+)$/.exec(line);
-    if (start) { file = { filename: start[2], status: "modified", patch: "", additions: 0 }; files.push(file); continue; }
+    const start = /^diff --git ("a\/.+"|a\/\S+) ("b\/.+"|b\/\S+)$/.exec(line);
+    if (start) { file = { filename: unquote(start[2]).slice(2), status: "modified", patch: "", additions: 0, changes: 0 }; files.push(file); inHunk = false; continue; }
     if (!file) continue;
-    if (line.startsWith("rename from ")) { file.previous_filename = line.slice(12); file.status = "renamed"; }
-    else if (line.startsWith("deleted file")) file.status = "removed";
-    else if (line.startsWith("new file")) file.status = "added";
-    else if (line.startsWith("Binary files")) delete file.patch;
-    else if (/^[+-]/.test(line) && !/^(\+\+\+|---) /.test(line) && typeof file.patch === "string") {
+    if (line.startsWith("@@")) { inHunk = true; continue; }
+    if (!inHunk) {
+      if (line.startsWith("rename from ")) { file.previous_filename = unquote(line.slice(12)); file.status = "renamed"; }
+      else if (line.startsWith("deleted file")) file.status = "removed";
+      else if (line.startsWith("new file")) file.status = "added";
+      else if (line.startsWith("Binary files")) delete file.patch;
+      continue;
+    }
+    if (/^[+-]/.test(line) && typeof file.patch === "string") {
       file.patch += `${line}\n`;
+      file.changes++;
       if (line.startsWith("+")) file.additions++;
     }
   }
@@ -145,7 +161,7 @@ export function parseUnifiedDiff(text) {
 }
 
 /** Lines a patch adds or removes (removing a guard is as risky as adding a worker). */
-export const changedLines = (patch) => patch.split("\n").filter((line) => /^[+-]/.test(line) && !/^(\+\+\+|---) /.test(line)).map((line) => line.slice(1));
+export const changedLines = (patch) => patch.split("\n").filter((line) => /^[+-]/.test(line)).map((line) => line.slice(1));
 
 /** Signals one file trips: path rules on both names of a rename, line rules on changed lines. Shared by the gate and the edit hook. */
 export function fileSignals(file, config, rules = allRules(config)) {
@@ -162,7 +178,8 @@ export function fileSignals(file, config, rules = allRules(config)) {
     const patterns = rule.lines.map((pattern) => new RegExp(pattern, "i"));
     if (changedLines(file.patch).some((line) => patterns.some((pattern) => pattern.test(line)))) out.push(rule);
   }
-  if (!ignored && typeof file.patch !== "string" && file.status !== "removed") out.push(BUILTIN_RULES[1]);
+  // No patch: GitHub omits it for oversized diffs (unscanned) but also for renames, empty files and binaries (no changed lines).
+  if (!ignored && typeof file.patch !== "string" && file.status !== "removed" && (file.changes ?? file.additions ?? 0) > 0) out.push(BUILTIN_RULES[1]);
   return out;
 }
 
@@ -343,8 +360,15 @@ const section = (body, title) => {
 
 // ---------- evidence ----------
 
-const SKIPPED = /\.(skip|todo|only)\b|\bx(it|test|describe)\s*\(|\btest\.todo\b|@(Disabled|Ignore)\b|pytest\.mark\.skip/;
+const SKIPPED = /\.(skip|todo|skipIf|runIf)\b|\bx(it|test|describe)\s*\(|@(Disabled|Ignore)\b|pytest\.mark\.(skip|xfail)|t\.Skip\(/;
+const SKIPPED_BLOCK = /\b(describe|context|suite)\.(skip|todo|skipIf)\s*\(|\bxdescribe\s*\(|\bxcontext\s*\(|pytestmark\s*=\s*pytest\.mark\.skip/;
 const COMMENT = /^\s*(\/\/|#|\*|\/\*|--)/;
+/** A line that declares the named test: the name as a quoted string, or a test function of that name. */
+const declares = (line, name) => {
+  const n = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`\\b(it|test|specify|scenario|Scenario|describe)(\\.\\w+)*\\s*\\(\\s*["'\`]${n}["'\`]`).test(line)
+    || new RegExp(`\\b(def|func|fn|void)\\s+${n}\\s*\\(`).test(line);
+};
 const latestCheck = (ctx, name) => ctx.checks.filter((check) => check.name === name && !GATE_CHECKS.includes(check.name)).at(-1);
 
 /** Resolve one evidence ref against the PR head. Returns null when it holds, else the reason it doesn't. */
@@ -358,14 +382,17 @@ async function refProblem(ref, criterion, ctx, evalsProblem) {
   if (kind === "test") {
     const [rawPath, rawName] = rest.split("#");
     const path = rawPath.trim(), name = rawName?.trim();
-    if (!name) return `${path}: name the test (test:<path>#<test name>)`;
+    if (!safePath(path)) return `"${path}" is not a plain repository path`;
+    if (!name || name.length < 6) return `${path}: name the test, in full (test:<path>#<test name>)`;
     if (rule?.paths && !matchesAny(path, rule.paths)) return `${path} is not where ${verify} tests live (config.verify.${verify}.paths: ${rule.paths.join(", ")})`;
     const text = await ctx.read(path, "head");
     if (text === null) return `test file ${path} does not exist in this PR`;
-    const lines = text.split("\n").filter((line) => line.includes(name));
-    if (lines.length === 0) return `${path} has no test named "${name}"`;
+    const lines = text.split("\n").filter((line) => declares(line, name));
+    if (lines.length === 0) return `${path} declares no test named "${name}"`;
     if (!lines.some((line) => !SKIPPED.test(line) && !COMMENT.test(line))) return `"${name}" in ${path} is skipped, a todo or a comment`;
-    if (rule?.checks?.length && !checksPass(rule.checks)) return `the ${verify} suite (${rule.checks.join(" or ")}) has not passed on this commit`;
+    if (SKIPPED_BLOCK.test(text)) return `${path} has a skipped block, so "${name}" may never run`;
+    if (!rule?.checks?.length) return `config.verify.${verify}.checks names no CI check, so nothing shows the ${verify} suite ran on this commit`;
+    if (!checksPass(rule.checks)) return `the ${verify} suite (${rule.checks.join(" or ")}) has not passed on this commit`;
     return null;
   }
   if (kind === "ci") {
@@ -389,6 +416,7 @@ async function evalsProblemFor(task, ctx, critical) {
   if (!(gold.good >= 1 && gold.bad >= 1) || total < minGold) return `the gold set needs known-good and known-bad cases, at least ${minGold} in all`;
   if (!str(gold.ref)) return "the gold set needs a ref (a file on the base branch listing its cases)";
   const ref = gold.ref.replace(/\/+$/, "");
+  if (!safePath(ref)) return `the gold set ref "${ref}" is not a plain repository path`;
   if ((await ctx.read(ref, "base")) === null) return `the gold set ${ref} is not on the base branch: land it in its own PR first, so the scorer is judged on cases this PR didn't write`;
   if (ctx.files.some((f) => [f.filename, f.previous_filename].some((name) => name && (name === ref || name.startsWith(`${ref}/`))))) {
     return `this PR changes the gold set ${ref}: change it in its own PR`;
@@ -496,6 +524,10 @@ export async function evaluate(ctx) {
     try { task = JSON.parse(raw); } catch (error) { r.blockers.push(`task ${id}: task.json is not valid JSON (${error.message})`); continue; }
     const structural = taskErrors(task, id, config);
     if (structural.length) { r.blockers.push(...structural.map((e) => `task ${id}: ${e}`)); continue; }
+    if (!touched.has(id) && task.pr !== ctx.pr.number) {
+      r.blockers.push(`task ${id}: this PR cites it but doesn't change it, and it isn't ${id}'s PR (its "pr" is ${task.pr ?? "unset"}): a finished task can't cover new work`);
+      continue;
+    }
     r.task = task;
     r.title = task.title;
     for (const s of task.signals ?? []) listed.add(s);
@@ -535,6 +567,7 @@ export async function evaluate(ctx) {
     if (tier !== "small") {
       if (!substantive(task.outcome)) add("outcome must state the user outcome being optimized");
       if (!Array.isArray(task.criteria) || task.criteria.length === 0) add("criteria are required (functional, safety, operational; each with how it is verified)");
+      else if (!task.criteria.some((c) => c.severity === "critical")) add("at least one criterion must be critical (what this change must do, proven before merge)");
       if (!waiving("challenge")) for (const e of challengeErrors(task.challenge, tier)) add(e);
     }
     if (tier === "high") {
@@ -543,18 +576,18 @@ export async function evaluate(ctx) {
       const reviewPath = task.challenge?.review ? `.flow/tasks/${id}/${task.challenge.review}` : null;
       if (reviewPath && !waiving("challenge")) {
         if (docs[reviewPath] === null || docs[reviewPath] === undefined) add(`challenge review ${task.challenge.review} does not exist (run /flow:challenge with an independent reviewer)`);
-        else if (!/^\s*verdict:\s*pass\b/im.test(docs[reviewPath])) add(`challenge review ${task.challenge.review} does not say "verdict: pass"`);
+        else if (!lastLineVerdict(docs[reviewPath])) add(`challenge review ${task.challenge.review} does not end with "verdict: pass"`);
       }
     }
     if ((task.signals ?? []).some((s) => rules.get(s)?.capacity) && !waiving("capacity")) {
       for (const e of capacityErrors(task.capacity, tier, waiving("measured-workload"))) add(e);
     }
-    for (const d of task.decisions ?? []) if (!substantive(d.chosen)) add(`🔴 decision ${d.id} is open: "${esc(d.question)}" (decide it with the human and record "chosen")`);
+    for (const d of task.decisions ?? []) if (!substantive(d.chosen)) add(`🔴 decision ${d.id} is open: "${d.question}" (decide it with the human and record "chosen")`);
     for (const a of task.challenge?.assumptions ?? []) {
       if (a.status !== "unverified") continue;
-      if (a.blocks === "merge") add(`unverified assumption blocks merge: ${esc(a.text)}`);
-      else if (a.blocks === "rollout") r.rolloutBlockers.push(esc(a.text));
-      else r.unknowns.push(`unverified assumption (accepted): ${esc(a.text)}`);
+      if (a.blocks === "merge") add(`unverified assumption blocks merge: ${a.text}`);
+      else if (a.blocks === "rollout") r.rolloutBlockers.push(a.text);
+      else r.unknowns.push(`unverified assumption (accepted): ${a.text}`);
     }
 
     // Evidence for every criterion; critical ones block.
@@ -671,7 +704,7 @@ async function verifyProblem(ctx, id) {
   }
   const notes = await ctx.read(`.flow/tasks/${id}/verify.md`, "head");
   if (notes === null) return "no independent verification (.flow/tasks/<ID>/verify.md from /flow:verify)";
-  if (!/^\s*verdict:\s*pass\b/im.test(notes)) return 'verify.md does not say "verdict: pass"';
+  if (!lastLineVerdict(notes)) return 'verify.md does not end with "verdict: pass"';
   return null;
 }
 
@@ -681,7 +714,7 @@ function stagesFor(ctx, results) {
   const tested = ci.length === 0 ? "unknown" : ci.some((check) => check.status !== "completed") ? "running"
     : ci.every((check) => ["success", "neutral", "skipped"].includes(check.conclusion)) ? "pass" : "fail";
   const integrations = results.map((r) => r.dims?.integration).filter(Boolean);
-  const live = (ctx.deployments ?? []).filter((d) => d.state === "success");
+  const live = (ctx.deployments ?? []).filter((d) => d.state === "success" && d.environment !== "flow-gate");
   const high = results.filter((r) => r.tier === "high");
   return {
     built: "pass",
@@ -691,6 +724,16 @@ function stagesFor(ctx, results) {
     deployed: !ctx.pr.merged ? "no" : live.length ? `pass: ${[...new Set(live.map((d) => d.environment))].join(", ")}` : "unknown",
     authorized: high.length === 0 ? "n/a" : high.every((r) => r.approved.ship) ? "pass" : "pending",
   };
+}
+
+/**
+ * The check run to post for a result, or null to post none. A skipped PR (unprotected base) posts nothing: check runs
+ * belong to the commit, so a "success" there would also turn green another PR that shares the commit.
+ */
+export function checkToPost(result) {
+  if (result.skipped) return null;
+  const title = result.error ? "flow: error" : result.ok ? `flow: pass${result.tier ? ` (${result.tier})` : ""}` : `flow: ${result.blockers.length} blocker${result.blockers.length === 1 ? "" : "s"}`;
+  return { ok: !!result.ok, title };
 }
 
 // ---------- rendering ----------
@@ -703,21 +746,21 @@ export function render(result, { pr } = {}) {
   const head = result.error ? "❌ flow: error" : result.skipped ? "➖ flow: not judged here" : result.ok ? "✅ flow: pass" : `❌ flow: ${result.blockers.length} blocker${result.blockers.length === 1 ? "" : "s"}`;
   out.push(`### ${head}${result.tier ? ` · ${result.tier} risk` : ""}${pr ? ` · PR #${pr}` : ""}`);
   if (result.error) { out.push("", esc(result.error), "", "The gate fails closed: fix the cause above, then push or comment `/flow` to re-run."); return out.join("\n"); }
-  if (result.skipped) { out.push("", result.skipped); return out.join("\n"); }
+  if (result.skipped) { out.push("", esc(result.skipped)); return out.join("\n"); }
   if (result.signals.length) out.push("", `**Risk detected:** ${result.signals.map((s) => `\`${s.id}\` ${s.why}`).join(" · ")}`);
   if (result.small) out.push("", "Small change: no risk rules matched, so no task or approval is needed.");
   const stages = result.stages ?? {};
   out.push("", ["built", "tested", "integrated", "merged", "deployed", "authorized"].map((stage) => `${icon(stages[stage])} ${stage}`).join(" → "));
   if (stages.deployed?.startsWith("pass")) out.push("", `Deployed (GitHub deployments): ${stages.deployed.slice(6)}`);
   for (const r of result.tasks) {
-    out.push("", `#### ${r.id}${r.title ? ` · ${esc(r.title)}` : ""}${r.tier ? ` · ${r.tier}` : ""}`);
+    out.push("", `#### ${esc(r.id)}${r.title ? ` · ${esc(r.title)}` : ""}${r.tier ? ` · ${r.tier}` : ""}`);
     if (!r.task) continue;
     if (r.lowered) out.push("", `⚠️ **Tier override:** declared ${r.lowered.to}, its signals say ${r.lowered.from}${r.approved.override ? " (approved)" : ""}`);
     const rows = [];
     if (r.task.capacity) {
       for (const group of ["workload", "latency", "cost"]) {
         for (const [name, m] of Object.entries(r.task.capacity[group] ?? {})) {
-          rows.push([`${group}.${name}`, m?.source === "measured" ? "pass" : "estimate", `${esc(m?.value)} · ${m?.source === "measured" ? `measured ${esc(m?.at)}: ${esc(m?.ref)}` : `estimate: ${esc(m?.basis)}`}`]);
+          rows.push([`${group}.${name}`, m?.source === "measured" ? "pass" : "estimate", `${m?.value} · ${m?.source === "measured" ? `measured ${m?.at}: ${m?.ref}` : `estimate: ${m?.basis}`}`]);
         }
       }
     }
@@ -732,11 +775,12 @@ export function render(result, { pr } = {}) {
       rows.push(["spec approval", r.approved.spec ? "pass" : "pending", `spec@${r.hash}`]);
       rows.push(["ship approval", r.approved.ship ? "pass" : "pending", `ship@${result.shipHash} (these exact changes)`]);
     }
-    if (rows.length) out.push("", "| | | |", "|---|---|---|", ...rows.map(([name, state, detail]) => `| ${name} | ${icon(state)} ${state} | ${detail} |`));
-    if (r.rolloutBlockers?.length) out.push("", `Rollout blocked until verified: ${r.rolloutBlockers.join("; ")}`);
+    if (rows.length) out.push("", "| | | |", "|---|---|---|", ...rows.map(([name, state, detail]) => `| ${esc(name)} | ${icon(state)} ${state} | ${esc(detail)} |`));
+    if (r.rolloutBlockers?.length) out.push("", `Rollout blocked until verified: ${esc(r.rolloutBlockers.join("; "))}`);
   }
-  if (result.blockers.length) out.push("", "**Blockers**", ...result.blockers.map((b) => `- ${b}`));
-  if (result.unknowns.length) out.push("", "**Unknown** (shown, not blocking)", ...result.unknowns.map((u) => `- ${u}`));
+  // Blockers and unknowns quote task data (ids, field names, refs, file names): every line is escaped as a whole.
+  if (result.blockers.length) out.push("", "**Blockers**", ...result.blockers.map((b) => `- ${escLine(b)}`));
+  if (result.unknowns.length) out.push("", "**Unknown** (shown, not blocking)", ...result.unknowns.map((u) => `- ${escLine(u)}`));
   if (result.paste.length) {
     const how = result.mode === "signed" ? "run `node .github/flow/flow.mjs approve <line> --pr N` on your machine and post what it prints" : "post each line as its own PR comment";
     out.push("", `**Approver: review, then ${how}**`, "```", ...result.paste, "```");

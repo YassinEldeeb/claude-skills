@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { specDocPaths, specHash } from "../gate/lib.mjs";
 
 const template = JSON.parse(readFileSync(new URL("../templates/config.json", import.meta.url), "utf8"));
-export const CONFIG = { ...template, approvers: ["alice"], agents: ["agent-bot"], verify: { ...template.verify, integration: { paths: ["**/*.int.test.*"], checks: ["db-tests"] } } };
+export const CONFIG = { ...template, approvers: ["alice"], agents: ["agent-bot"], verify: { ...template.verify, integration: { paths: ["**/*.int.test.*"], checks: ["db-tests"] }, failure_injection: { paths: ["**/*.fault.test.*"], checks: ["db-tests"] }, e2e: { paths: ["**/e2e/**"], checks: ["db-tests"] } } };
 export const HEAD = "a".repeat(40);
 
 /** A complete, valid task of the given tier, plus the files it needs. Override fields to break one thing at a time. */

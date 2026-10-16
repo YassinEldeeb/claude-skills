@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, test } from "node:test";
-import { approveLine, diffHash, evaluate, globToRegExp, parseUnifiedDiff, render, signedMessage, sshVerifier } from "../gate/lib.mjs";
+import { approveLine, checkToPost, diffHash, evaluate, globToRegExp, parseUnifiedDiff, render, signedMessage, sshVerifier } from "../gate/lib.mjs";
 import { CONFIG, comment, ctx, green, hashOf, task, taskFiles } from "./fixtures.mjs";
 
 const has = (result, text) => result.blockers.some((b) => b.includes(text));
@@ -64,6 +64,11 @@ describe("tier comes from the diff", () => {
   test("editing the gate or its config is high risk", async () => {
     const r = await evaluate(ctx({ head: { ".flow/config.json": "{}" }, body: "## Evidence\nx" }));
     assert.ok(r.signals.some((s) => s.id === "flow-gate"));
+  });
+  test("any CI workflow change is a gate change (any workflow can post a check)", async () => {
+    const r = await evaluate(ctx({ head: { ".github/workflows/ci.yml": "on: pull_request" }, body: "## Evidence\nx" }));
+    assert.ok(r.signals.some((s) => s.id === "flow-gate"));
+    assert.equal(r.tier, "high");
   });
   test("removing lines counts: deleting a cron is a worker change", async () => {
     const files = [{ filename: "src/jobs.ts", status: "modified", patch: "-cron.schedule('* * * * *', sweep)", additions: 0 }];
@@ -266,7 +271,7 @@ describe("evidence is checked, not claimed", () => {
   };
   test("a missing test file, a missing test name, a skipped test", async () => {
     assert.ok(has(await evaluate(medium({ "T-1.1": ["test:src/nope.int.test.ts#reads a recent memory"] })), "does not exist"));
-    assert.ok(has(await evaluate(medium({ "T-1.1": ["test:src/bootstrap.int.test.ts#some other test"] })), "has no test named"));
+    assert.ok(has(await evaluate(medium({ "T-1.1": ["test:src/bootstrap.int.test.ts#some other test"] })), "declares no test named"));
     const skipped = { "src/bootstrap.int.test.ts": 'test.skip("reads a recent memory", () => {});' };
     assert.ok(has(await evaluate(medium({ "T-1.1": ["test:src/bootstrap.int.test.ts#reads a recent memory"] }, skipped)), "skipped"));
     const commented = { "src/bootstrap.int.test.ts": '// test("reads a recent memory") later' };
@@ -303,10 +308,11 @@ describe("pieces", () => {
     assert.ok(!globToRegExp("src/*.ts").test("src/a/b.ts"));
   });
   test("parseUnifiedDiff keeps added and removed lines, renames and binaries", () => {
-    const files = parseUnifiedDiff("diff --git a/x.ts b/y.ts\nrename from x.ts\nrename to y.ts\n--- a/x.ts\n+++ b/y.ts\n-old\n+new\ndiff --git a/i.png b/i.png\nBinary files a/i.png and b/i.png differ\n");
+    const files = parseUnifiedDiff("diff --git a/x.ts b/y.ts\nrename from x.ts\nrename to y.ts\n--- a/x.ts\n+++ b/y.ts\n@@ -1 +1 @@\n-old\n+new\n--- removed SQL comment\ndiff --git a/i.png b/i.png\nBinary files a/i.png and b/i.png differ\ndiff --git \"a/my file.ts\" \"b/my file.ts\"\n@@ -0,0 +1 @@\n+x\n");
     assert.equal(files[0].previous_filename, "x.ts");
-    assert.equal(files[0].patch, "-old\n+new\n");
+    assert.equal(files[0].patch, "-old\n+new\n--- removed SQL comment\n", "a removed line starting with -- is still a change");
     assert.equal(files[1].patch, undefined);
+    assert.equal(files[2].filename, "my file.ts");
   });
   test("render escapes task text: no mentions, links or HTML from a spec", async () => {
     const t = task("medium", { title: "Ping @alice [click](https://evil) <img src=x>" });
@@ -314,5 +320,59 @@ describe("pieces", () => {
     assert.ok(!out.includes("@alice"));
     assert.ok(!out.includes("[click](https://evil)"));
     assert.ok(!out.includes("<img"));
+  });
+});
+
+describe("fresh-eyes review fixes", () => {
+  test("a skipped PR posts no check run (a commit can be shared with a PR into main)", async () => {
+    const r = await evaluate(ctx({ prBase: "yassin/base", head: { "src/a.ts": "x" } }));
+    assert.equal(checkToPost(r), null);
+    assert.deepEqual(checkToPost({ ok: false, blockers: ["x"], tier: "high" }), { ok: false, title: "flow: 1 blocker" });
+  });
+  test("evidence and gold-set paths can't climb out of the repo (they'd reach other API endpoints)", async () => {
+    const t = task("medium", { evidence: { "T-1.1": ["test:x/integration/../../../issues/1#reads a recent memory"] } });
+    assert.ok(has(await evaluate(ctx(passing(t))), "not a plain repository path"));
+    const e = task("medium", { criteria: [{ id: "T-1.1", kind: "functional", severity: "critical", verify: "eval", behavior: "Matches the gold set facts" }], evidence: { "T-1.1": ["eval:x"] }, evals: { gold: { good: 6, bad: 6, correct: 12, ref: "../issues/1" }, results: { runs: 3, safetyFailures: 0, unknown: 0 } } });
+    assert.ok(has(await evaluate(ctx(passing(e))), "not a plain repository path"));
+  });
+  test("an old task can't be cited to cover new work", async () => {
+    const old = task("medium", { id: "OLD-1", pr: 3 });
+    const head = { ...taskFiles(old), "src/prompts/system.txt": "be nicer" };
+    const files = [{ filename: "src/prompts/system.txt", status: "modified", patch: "+be nicer", additions: 1 }];
+    const r = await evaluate(ctx({ head, files, body: "Flow-Task: OLD-1", checks: green("db-tests") }));
+    assert.ok(has(r, "a finished task can't cover new work"));
+  });
+  test("task text inside blockers can't mention, link or break the table", async () => {
+    const t = task("medium", { decisions: [{ id: "D1 @acme/admins", question: "Ping @acme/admins | <b>x</b> [link](https://evil.example)" }] });
+    const out = render(await evaluate(ctx(passing(t))));
+    assert.ok(!out.includes("@acme"), "no raw mention");
+    assert.ok(!out.includes("<b>"));
+    assert.ok(!out.includes("](https://"));
+    assert.ok(!out.includes("https://evil"), "bare URLs are not autolinked");
+  });
+  test("the verdict is the last non-empty line", async () => {
+    const p = passing(task("medium"));
+    p.head[".flow/tasks/T-1/verify.md"] = "Round 1\nverdict: pass\nRound 2 found a bug.\nverdict: blocked\n";
+    assert.ok(has(await evaluate(ctx(p)), 'end with "verdict: pass"'));
+  });
+  test("a test in a skipped block, or only named in an assertion, doesn't count; .only does", async () => {
+    const m = (text) => evaluate(ctx(passing(task("medium"), { head: { "src/bootstrap.int.test.ts": text } })));
+    assert.ok(has(await m('describe.skip("bootstrap", () => { test("reads a recent memory", () => {}) })'), "skipped"));
+    assert.ok(has(await m('describe.skip("bootstrap", () => {\n  test("reads a recent memory", () => {});\n});'), "skipped block"));
+    assert.ok(has(await m('test("other", () => { expect(x, "reads a recent memory").toBe(1) })'), "declares no test named"));
+    assert.equal((await m('test.only("reads a recent memory", () => {})')).ok, true);
+  });
+  test("a rename or empty file with no patch is not 'unscanned'", async () => {
+    const files = [{ filename: "src/b.ts", previous_filename: "src/a.ts", status: "renamed", changes: 0, additions: 0 }];
+    const r = await evaluate(ctx({ files, body: "## Evidence\nrenamed" }));
+    assert.equal(r.ok, true, r.blockers.join("\n"));
+  });
+  test("medium work needs at least one critical criterion", async () => {
+    const t = task("medium", { criteria: [{ id: "T-1.1", kind: "functional", severity: "normal", verify: "unit", behavior: "The label reads Save changes" }], evidence: {} });
+    assert.ok(has(await evaluate(ctx(passing(t))), "at least one criterion must be critical"));
+  });
+  test("a kind with no configured CI check can't prove a critical criterion", async () => {
+    const config = { ...CONFIG, verify: { ...CONFIG.verify, integration: { paths: ["**/*.int.test.*"], checks: [] } } };
+    assert.ok(has(await evaluate(ctx({ ...passing(task("medium")), config })), "names no CI check"));
   });
 });

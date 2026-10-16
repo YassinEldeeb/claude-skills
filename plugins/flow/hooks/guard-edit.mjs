@@ -24,7 +24,8 @@ try {
   const rel = relative(realpathSync(root), real(full)).split("\\").join("/");
   if (rel.startsWith("..")) process.exit(0);
   if (/^\.flow\/tasks\/[^/]+\/\.approved$/.test(rel)) block("Approval records are written only by `node .github/flow/flow.mjs sync <ID>` after a human approved on the PR. Never write them yourself.");
-  if (rel.startsWith(".flow/") || /\.(md|mdx|txt)$/i.test(rel)) process.exit(0);
+  // Task specs and docs stay editable; .flow/config.json goes through the risk check below (it is the gate's config).
+  if (rel.startsWith(".flow/tasks/") || /\.(md|mdx|txt)$/i.test(rel)) process.exit(0);
 
   const mine = branchTasks(flow, currentBranch(root));
   const before = flow.config.approvalBeforeBuild ?? ["high"];

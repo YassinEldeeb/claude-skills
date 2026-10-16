@@ -9,6 +9,7 @@
   "reviewBots": [],
   "approvalBeforeBuild": ["high"],
   "verify": {
+    "unit": {"paths": ["**/*.test.*", "**/*.spec.*", "**/test/**", "**/tests/**", "**/__tests__/**"], "checks": []},
     "integration": {"paths": ["**/*.int.test.*", "**/integration/**"], "checks": []},
     "failure_injection": {"paths": ["**/*.fault.test.*", "**/fault/**"], "checks": []},
     "e2e": {"paths": ["**/*.e2e.*", "**/e2e/**"], "checks": []}

@@ -53,6 +53,19 @@ describe("edit guard", () => {
     assert.equal(hook("guard-edit.mjs", code).status, 2, "changing the approved design holds edits again");
   });
 
+  test("MultiEdit and NotebookEdit inputs are checked too, and the gate config is risky", () => {
+    rmSync(join(repo, ".flow/tasks/T-1/.approved"), { force: true });
+    rmSync(join(repo, ".flow/tasks/T-1"), { recursive: true, force: true });
+    const multi = hook("guard-edit.mjs", { cwd: repo, tool_input: { file_path: join(repo, "src/jobs.ts"), edits: [{ old_string: "a", new_string: "cron.schedule('* * * * *', sweep)" }] } });
+    assert.equal(multi.status, 2);
+    const notebook = hook("guard-edit.mjs", { cwd: repo, tool_input: { notebook_path: join(repo, "nb/backfill.ipynb"), new_source: "await queue.add('x')" } });
+    assert.equal(notebook.status, CONFIG.codeFiles.some((g) => g.endsWith(".ipynb")) ? 2 : 0, "notebooks are scanned only when codeFiles includes them");
+    const config = hook("guard-edit.mjs", { cwd: repo, tool_input: { file_path: join(repo, ".flow/config.json"), content: "{}" } });
+    assert.equal(config.status, 2);
+    assert.match(config.stderr, /flow-gate/);
+    for (const [path, text] of Object.entries(taskFiles(task("high", { branch: "feature/memory", pr: 7 })))) write(path, text);
+  });
+
   test("an agent can't write the approval record itself", () => {
     const r = hook("guard-edit.mjs", { cwd: repo, tool_input: { file_path: join(repo, ".flow/tasks/T-1/.approved"), content: "spec@x by alice" } });
     assert.equal(r.status, 2);
@@ -69,10 +82,15 @@ describe("self-authorization guard", () => {
     "GH_TOKEN=x gh pr merge 7 --squash --admin",
     "gh api -X PUT repos/acme/app/branches/main/protection --input p.json",
     "gh api --method DELETE repos/acme/app/rulesets/42",
+    "ssh-keygen -Ysign -f k -n flow < m",
+    "gh api --method=PUT repos/acme/app/branches/main/protection --input p.json",
+    "gh api repos/acme/app/rulesets --input r.json",
+    "gh pr merge 7 --squash \\\n  --admin",
+    "cp /tmp/x .flow/tasks/T-1/.approved",
   ]) {
     test(`refuses: ${command.slice(0, 60)}`, () => assert.equal(hook("guard-bash.mjs", { cwd: repo, tool_input: { command } }).status, 2));
   }
-  for (const command of ["gh pr merge 7 --squash", "node .github/flow/flow.mjs sync T-1", "gh api -X GET repos/acme/app/branches/main/protection", "git status"]) {
+  for (const command of ["gh pr merge 7 --squash", "node .github/flow/flow.mjs sync T-1", "gh api -X GET repos/acme/app/branches/main/protection", "gh api repos/acme/app/rules/branches/main", "git status", 'git commit -m "docs: how /flow approve works"', "cat .flow/tasks/T-1/.approved"]) {
     test(`allows: ${command}`, () => assert.equal(hook("guard-bash.mjs", { cwd: repo, tool_input: { command } }).status, 0));
   }
   test("does nothing outside a flow repo", () => {

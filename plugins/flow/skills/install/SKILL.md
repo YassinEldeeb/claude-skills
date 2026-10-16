@@ -26,12 +26,12 @@ One message, with your recommendation:
 ## 3. Files
 
 - `../../gate/lib.mjs` → `.github/flow/lib.mjs` and `../../gate/flow.mjs` → `.github/flow/flow.mjs`.
-- `../../templates/github/workflows/flow.yml` (or `flow-hardened.yml`) → `.github/workflows/flow.yml`.
+- `../../templates/github/workflows/flow.yml` (or `flow-hardened.yml`) → `.github/workflows/flow.yml`. Set its `workflow_run.workflows` to this repo's CI workflow names, so the gate re-runs when CI finishes and CI checks can count as evidence.
 - `../../templates/config.json` → `.flow/config.json`, tailored to this repo:
   - approvers or signers, and agents;
   - `branches`: the protected branches;
   - `risk` paths matching where migrations, auth, billing, workers and prompts actually live; drop rules that can't apply, add repo-specific ones;
-  - `verify`: the test paths and CI check names for integration, failure_injection and e2e;
+  - `verify`: for each kind (unit, integration, failure_injection, e2e), the test paths and the CI check names that run them. Until a kind names a check, its tests can't prove a critical criterion: the gate can't see that the suite ran;
   - `ignore` and `codeFiles` for the languages in use.
 - **The PR template:** add the `Flow-Task:` line and the `## Evidence` section to `.github/PULL_REQUEST_TEMPLATE.md`, or copy `../../templates/github/PULL_REQUEST_TEMPLATE.md`.
 - **The rules:** add `../../templates/rules.md` to CLAUDE.md, and to AGENTS.md if it exists. Replace an older "How agents work here (flow)" section rather than adding a second one.
@@ -40,7 +40,9 @@ One message, with your recommendation:
 
 ## 4. Upgrading
 
-- **From flow 2.x:** replace only `.github/flow/*` and the workflow, in a PR of their own, with no task-schema changes in the same PR. The old gate judges the PR, and it changes the gate itself, so it is high risk and needs approval.
+- **From flow 2.x:** replace only `.github/flow/*` and the workflow, in a PR of their own, with no task-schema changes in the same PR. The old gate judges the PR, and changing the gate is high risk (`flow-gate`).
+  - Give the PR a task: tier `medium`, signals `["flow-gate"]`, criteria such as "the gate's tests pass" with `ci:` evidence.
+  - Ask the human for the `override` approval it needs; never ask for less.
 - **From flow 1.x** (`status.md`, `decisions.md`, `.github/flow/check.mjs`):
   - move open 🔴 rows and unapproved "Changed" items into one task;
   - delete those files and the 1.x check;
@@ -49,7 +51,7 @@ One message, with your recommendation:
 ## 5. Prove it
 
 - `node .github/flow/flow.mjs validate` passes once approvers or signers are set.
-- After opening the PR, `node .github/flow/flow.mjs check --pr <N> --config .flow/config.json` shows what the gate will say. Before merge, the protected branch has no config, so the real gate reports "not set up".
+- After opening the PR, `node .github/flow/flow.mjs check --pr <N> --config .flow/config.json` shows what the gate will say. Before the merge no gate runs at all: the workflow isn't on the protected branch yet.
 - The install PR itself is not judged by the gate (it isn't on the protected branch yet): a human reviews it.
 
 ## 6. Report: what enforces what, and the human's steps

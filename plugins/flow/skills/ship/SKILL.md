@@ -12,6 +12,8 @@ description: Open the PR with evidence, get the flow gate and CI green, merge, d
    Set `pr` in `task.json`.
 2. **See what the gate will say** before asking anyone: `node .github/flow/flow.mjs check --pr <N>`. Fix every blocker you can.
 3. **Watch CI, the gate and any review bot** until done. Use a cheaper model or a background wait for the watching. Fix clear findings yourself.
+   - The gate re-runs on every push, when the CI workflows named in its `workflow_run` trigger finish, and on any comment containing `/flow`.
+   - If CI or a review bot finished and the `flow` check still shows the old result, comment `/flow` to re-run it.
 4. **High risk, checkpoint 3:** when everything else is green, the gate posts the `ship@` line for these exact changes. Ask the human with that line and one screen:
    - what works, with evidence;
    - what's unknown;

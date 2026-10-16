@@ -13,10 +13,10 @@ Five mechanisms. Everything else is a skill (a prompt) built on top of them.
 | # | Mechanism | What it is |
 |---|---|---|
 | M1 | **Task spec** | `.flow/tasks/<ID>/task.json` (machine-checked, strict schema) + `design.md` (for humans). One directory per task, so parallel worktrees and PRs never share a state file. |
-| M2 | **Risk rules** | `.flow/config.json` lists path globs and changed-line patterns (added *or removed*) that mark a change medium or high; some also require a capacity model. Built-in rules: changing the gate is high, an unscannable file is high, a new top-level directory is medium. The gate classifies every PR from its diff; a builder can only *raise* the tier. |
+| M2 | **Risk rules** | `.flow/config.json` lists path globs and changed-line patterns (added *or removed*) that mark a change medium or high; some also require a capacity model. Built-in rules: changing the gate, its config or any CI workflow is high (any workflow can post checks); a file whose diff GitHub omits is high; a new top-level directory is medium. The gate classifies every PR from its diff; a builder can only *raise* the tier. |
 | M3 | **One evaluator** | `evaluate()` in `.github/flow/lib.mjs`: from config, PR, diff, tasks, comments, reviews, checks and deployments to a verdict and a dashboard. The CI gate, `flow status`, `flow check` dry runs and `rollout-ok` call it. The hooks share its parsers and rules from the plugin's copy, and SessionStart warns when the two versions differ. |
 | M4 | **Content-bound approvals** | A PR comment whose first line is `/flow approve <ID> <kind>@<hash>`. The kinds: `spec` (task.json minus progress fields, design.md and the challenge review, 96-bit hash); `ship` (the PR's diff against its merge base, which survives a clean "Update branch"); `override` (a lower tier or a waiver). **Signed mode**: only an SSH signature by a key in `config.signers` counts, over repo, task, kind and hash; it holds even when agents share the human's GitHub login. **Login mode**: only `config.approvers` (login or `login#id`), never `agents`, bots, the PR author (by default) or an edited comment. |
-| M5 | **A gate the PR can't rewrite** | `pull_request_target` + `issue_comment` run the workflow from the protected branch. Config and dependency state are read from the default branch through the API; the PR's code never runs. A PR into an unprotected branch isn't judged. The verdict is the `flow` check run, re-posted on every push and on every comment mentioning `/flow`, never onto a head that moved during the check. **Standard mode**: posted by GitHub Actions. **Hardened mode**: posted by the repo's own GitHub App, whose key lives in an environment limited to the protected branch. Fails closed. |
+| M5 | **A gate the PR can't rewrite** | `pull_request_target` + `issue_comment` run the workflow from the protected branch. Config and dependency state are read from the default branch through the API; the PR's code never runs. A PR into an unprotected branch isn't judged. The verdict is the `flow` check run, re-posted on every push, when the repo's CI workflows finish (`workflow_run`), and on every comment mentioning `/flow`. It is never posted onto a head that moved during the check, and never for a skipped PR, since check runs belong to commits that other PRs can share. **Standard mode**: posted by GitHub Actions. **Hardened mode**: posted by the repo's own GitHub App, whose key lives in an environment limited to the protected branch. Fails closed. |
 
 Hooks (best effort, Claude Code only):
 - **SessionStart:** also fires after `/compact`. Names the branch's task, whether its code is held, its open 🔴 decisions, and a gate version mismatch.
@@ -58,7 +58,7 @@ Bypass resistance: **H** = needs a human's GitHub identity or signing key, or re
 | The gate can't be changed by the PR it judges | Protected-branch workflow and config; built-in `flow-gate` high rule | H | `editing the gate or its config is high risk` |
 | The verdict can't be forged | Hardened: App check run with an environment-scoped key, pinned source. Standard: GitHub Actions check (any workflow can post one) | H hardened; M standard (needs agents without the `workflow` scope and a read-only default token) | `flow doctor` reports the mode and settings |
 | Fail closed | Missing or invalid config or task, unknown schema, truncated file list, API error → failure | H | `fail closed: *` (6) |
-| Criteria are testable and traced | Schema plus evidence refs that resolve (file exists, test named, not skipped, in the kind's paths, the kind's suite green) | M | `evidence: *` (6) |
+| Criteria are testable and traced | Schema plus evidence refs that resolve: a plain repo path, a declared test, not skipped (line or block), in the kind's paths, and the kind's configured CI check green (commit statuses count). A kind with no configured check can't prove a critical criterion | M | `evidence: *`, `fresh-eyes review fixes` |
 | Cross-system safety isn't proven by unit tests | Critical safety verify ∈ {integration, e2e, failure_injection, eval}; paths per kind | M | `S3` |
 | Architecture challenged before building | High: challenge + review file with `verdict: pass` (CI); the edit hook holds code until spec approval | M (CI), L (hook) | `S1`, `edit guard` |
 | Economics modeled | `capacity` on capacity signals; typed keys; measured = ref + date; high needs ≥1 measured workload number | M | `S1` |
@@ -69,7 +69,7 @@ Bypass resistance: **H** = needs a human's GitHub identity or signing key, or re
 | No self-authorization in the session | Bash and edit hooks | L | `self-authorization guard` (12) |
 | Token economy | Non-blocking guard; cheaper models for chores in the skills | L | `the context guard warns but never blocks` |
 
-Each protection was also checked by mutation: disabling it turns at least one test red. The checked list: edited comments, agent logins, unscanned files, skipped tests, the dependency's merge, unit tests for safety, removed lines, the tier floor on the protected branch, the gold set's location, the ship hash, and unapproved waivers.
+Each protection was also checked by mutation: disabling it turns at least one test red. 19 protections were checked: edited comments, agent logins, unscanned files, skipped lines and skipped blocks, the dependency's merge, unit tests for safety, removed lines, the tier floor on the protected branch, the gold set's location, the ship hash, unapproved waivers, posting for skipped PRs, path safety, cited old tasks, last-line verdicts, kinds without CI checks, workflows as gate changes, and blocker escaping.
 
 ## 4. Task lifecycle
 
@@ -95,7 +95,7 @@ The entry point is `/flow:start <goal>`. It classifies, then runs challenge → 
 3. **Skills:** `start` (router), `challenge`, `build`, `verify`, `ship`, `status`, `orchestrate`, `install` (also upgrades and migrates 1.x).
 4. **Hooks:** session-start, edit guard, self-authorization guard, non-blocking context guard.
 5. **deadline-mode precedence;** a README with the enforcement table and the hardening steps.
-6. **Tests:** 88 `node --test` cases (gate, scenarios, real hook and CLI processes, real ssh-keygen), plus CI for this repo.
+6. **Tests:** 106 `node --test` cases (gate, scenarios, real hook and CLI processes, real ssh-keygen), plus CI for this repo.
 
 ## 6. Regression tests: the Memory v2 failures
 
@@ -120,7 +120,8 @@ The entry point is `/flow:start <goal>`. It classifies, then runs challenge → 
 - **Stale verdicts:** a verdict can go stale when the base moves. Require branches to be up to date (the doctor checks it); a scheduled re-evaluation of open PRs isn't built.
 - **Merge queues:** `merge_group` reports success, because each PR passed the gate before queueing. Combined-system tests belong to the repo's own merge_group CI.
 - **Upgrades:** the old gate judges the upgrade PR (high risk, approval needed). Change the task schema only after the new gate is live.
-- **Not built:** per-task token accounting, detection of overlapping open PRs, deploy verification beyond GitHub deployment records, and a live sandbox-repo end-to-end test of the GitHub mechanics (see the PR).
+- **Signed approvals aren't bound to a PR number.** One could be copied to another PR whose task has byte-identical content; the content binding limits the harm.
+- **Not built:** per-task token accounting, detection of overlapping open PRs, deploy verification beyond GitHub deployment records, JUnit-level proof that a named test ran, and a live sandbox-repo end-to-end test of the GitHub mechanics (see the PR).
 
 ## 8. Adversarial review: findings and resolutions
 
@@ -153,3 +154,28 @@ An independent reviewer attacked the first draft of this design (6 blockers, 18 
 | M24 | Upgrade deadlock on schema versions | The gate upgrade ships in its own PR before any schema change. |
 | m25–m35 | Re-runs, Bash writes, version drift, logins, Markdown injection, override visibility, overlapping PRs, deadline waivers, production access, decisions, comment filtering | Config read through the API at run time; Bash writes labeled L; versions surfaced; `login#id`; all task text escaped; override shown as a banner and its own verb; overlapping PRs not built (limit); typed `waivers` need approval; the challenge skill names the human-export path; decisions are typed in task.json; the job's `if` filters comments |
 | 36 | Use native reviews, not comment parsing | Not adopted as the default: native reviews can't separate a human from an agent that shares their login (the owner's setup), and GitHub forbids self-approval. Signed comments can. `reviewBots` adopts native reviews where a separate bot identity exists. |
+
+## 9. Fresh-eyes review of the build: findings and fixes
+
+A second independent reviewer audited the built diff (25 findings). The material ones:
+
+| Finding | Fix |
+|---|---|
+| A PR into an unprotected branch posted a passing `flow` check on a commit another PR to main shares | A skipped PR posts nothing (`checkToPost`) |
+| Workflow-level concurrency let comment runs that the `if:` skips cancel real gate runs | Concurrency is at the job level |
+| `..` in evidence or gold-set paths reached other API endpoints (an issue body counted as a test) | `safePath` on every path taken from task data |
+| An old merged task could be cited to cover a new PR | A cited task must be changed by the PR or have `pr` set to it |
+| Task text inside blockers rendered raw (mentions, links, table breaks, autolinked URLs) | `render` escapes every blocker, unknown and cell as a whole line; only the gate's own approval code spans are restored |
+| Any line saying "verdict: pass" counted | Only the last non-empty line counts |
+| Renames, empty files and binaries (no patch) counted as unscanned, so high | Unscanned only when the file has changes GitHub didn't show |
+| "Its suite must have passed" held only if the config named checks | A kind with no configured CI check can't prove a critical criterion; commit statuses count as checks |
+| Skip detection was per line; a name in an assertion message counted | A test must be declared by a test call or test function; skipped blocks fail; `.only` is not a skip |
+| The gate never re-ran when CI finished | A `workflow_run` trigger; the ship skill says to comment `/flow` |
+| Workflow changes were only medium, though any workflow can post checks | `.github/workflows/**` and `.github/actions/**` are in the built-in `flow-gate` rule; the doctor and README name the `workflow` scope as what stops forgery, not the default token |
+| The hardened mode's own environment made merged PRs look deployed | `flow-gate` deployments are ignored; a merge-queue note was added to the App setup |
+| Ship hash included context lines | It hashes changed lines only |
+| Bash guard bypasses (`-Ysign`, `--method=PUT`, implicit POST with `--input`, `\` continuations) and false refusals (commit messages, `cat`) | Tightened, with tests for each |
+| `.flow/config.json` edits skipped the edit hook's risk check | Only `.flow/tasks/` is exempt |
+| A medium task with only normal criteria passed with no evidence | Medium and high need at least one critical criterion |
+| Quoted file names and removed `-- ` lines broke the diff parser | Fixed, with a test |
+| Dashboard update could patch another bot's comment or duplicate after an error | Comments are listed fresh; a failed PATCH falls back to a new comment |

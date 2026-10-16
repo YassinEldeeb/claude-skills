@@ -5,7 +5,7 @@ import { execFileSync } from "node:child_process";
 import { appendFileSync, existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-  FLOW_VERSION, approveLine, configErrors, detectSignals, evaluate, parseApprovals, parseUnifiedDiff, render, signedMessage, specDocPaths, specHash, sshVerifier, taskErrors,
+  FLOW_VERSION, approveLine, configErrors, detectSignals, evaluate, parseApprovals, parseUnifiedDiff, checkToPost, render, signedMessage, specDocPaths, specHash, sshVerifier, taskErrors,
 } from "./lib.mjs";
 
 const USAGE = `flow ${FLOW_VERSION}
@@ -125,7 +125,12 @@ async function gather(repo, number, { configText } = {}) {
   ctx.filesTruncated = files.truncated;
   ctx.comments = comments.items;
   ctx.reviews = reviews.items;
-  ctx.checks = checks.items.sort((a, b) => String(a.started_at ?? "").localeCompare(String(b.started_at ?? "")));
+  // Commit statuses (Jenkins, CircleCI, Buildkite…) count as checks too, by their context name.
+  const statuses = (await api(`repos/${repo}/commits/${head}/status?per_page=100`).catch(() => null))?.statuses ?? [];
+  ctx.checks = [
+    ...checks.items,
+    ...statuses.map((s) => ({ name: s.context, status: s.state === "pending" ? "in_progress" : "completed", conclusion: s.state === "pending" ? null : s.state === "success" ? "success" : "failure", started_at: s.updated_at })),
+  ].sort((a, b) => String(a.started_at ?? "").localeCompare(String(b.started_at ?? "")));
   ctx.baseRoot = Array.isArray(root) ? root.map((entry) => entry.name) : null;
   ctx.deployments = [];
   if (pr.merged && pr.merge_commit_sha) {
@@ -175,14 +180,15 @@ async function check() {
     if (post) await postCheck(repo, event.merge_group.head_sha, { ok: true, title: "flow: validated on the PR", summary: "Merge queue entry: every PR in it passed the flow gate before it was queued." });
     return 0;
   }
-  if (!number) number = event.pull_request?.number ?? (event.issue?.pull_request ? event.issue.number : undefined);
+  // workflow_run: a CI workflow finished, so its checks can now count as evidence (fork PRs carry no PR list here).
+  if (!number) number = event.pull_request?.number ?? (event.issue?.pull_request ? event.issue.number : undefined) ?? event.workflow_run?.pull_requests?.[0]?.number;
+  if (!number && eventName === "workflow_run") { console.log("workflow_run without a same-repo PR: nothing to judge"); return 0; }
   if (!repo || !number) throw new Error("no PR to check: pass --pr N (and --repo owner/name outside a GitHub checkout)");
 
-  let result, headSha, comments = [];
+  let result, headSha;
   try {
     const { ctx } = await gather(repo, number, { configText: configFile ? readFileSync(configFile, "utf8") : undefined });
     headSha = ctx.pr.headSha;
-    comments = ctx.comments;
     result = await evaluate(ctx);
   } catch (error) {
     // Fail closed: an error is a failing gate, never a skipped one.
@@ -197,9 +203,11 @@ async function check() {
       return 0;
     }
     headSha ??= current;
-    const title = result.error ? "flow: error" : result.skipped ? "flow: not judged here" : result.ok ? `flow: pass${result.tier ? ` (${result.tier})` : ""}` : `flow: ${result.blockers.length} blocker${result.blockers.length === 1 ? "" : "s"}`;
-    await postCheck(repo, headSha, { ok: result.ok, title, summary });
-    if (!result.skipped) await upsertDashboard(repo, number, comments, summary);
+    const verdict = checkToPost(result);
+    if (verdict) {
+      await postCheck(repo, headSha, { ...verdict, summary });
+      await upsertDashboard(repo, number, summary);
+    }
     if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${summary}\n`);
   }
   console.log(summary);
@@ -215,11 +223,16 @@ async function postCheck(repo, sha, { ok, title, summary }) {
 }
 
 const MARKER = "<!-- flow:dashboard -->";
-async function upsertDashboard(repo, number, comments, summary) {
-  const body = `${MARKER}\n${summary}\n\n<sub>flow ${FLOW_VERSION} · updates on every push and on every comment that mentions /flow</sub>`;
-  const mine = comments.find((comment) => comment.user?.type === "Bot" && (comment.body ?? "").startsWith(MARKER));
-  if (mine) { if (mine.body !== body) await api(`repos/${repo}/issues/comments/${mine.id}`, { method: "PATCH", body: { body } }); }
-  else await api(`repos/${repo}/issues/${number}/comments`, { method: "POST", body: { body } });
+async function upsertDashboard(repo, number, summary) {
+  const body = `${MARKER}\n${summary}\n\n<sub>flow ${FLOW_VERSION} · updates on every push, when CI finishes, and on every comment that mentions /flow</sub>`;
+  // Listed fresh (an errored gather has no comments); the newest marked bot comment is ours. If another bot owns it, post our own.
+  const comments = (await pages(`repos/${repo}/issues/${number}/comments`)).items;
+  const mine = comments.filter((comment) => comment.user?.type === "Bot" && (comment.body ?? "").startsWith(MARKER)).at(-1);
+  if (mine?.body === body) return;
+  if (mine) {
+    try { await api(`repos/${repo}/issues/comments/${mine.id}`, { method: "PATCH", body: { body } }); return; } catch { /* not ours to edit */ }
+  }
+  await api(`repos/${repo}/issues/${number}/comments`, { method: "POST", body: { body } });
 }
 
 async function status() {
@@ -357,13 +370,13 @@ async function doctor() {
     const pinned = required.every((c) => c.app === expected);
     say(pinned, pinned ? `the required check is pinned to app ${expected}${expected === ACTIONS_APP_ID ? " (GitHub Actions)" : " (your flow App)"}` : `pin the required "flow" check's source to app ${expected}; otherwise any app can post a passing "flow"`);
   }
-  if (expected === ACTIONS_APP_ID) note('standard mode: any workflow can post a check as GitHub Actions. Hard only if the default workflow token is read-only, no workflow that runs PR code asks for checks: write, and agents cannot push workflow files (no "workflow" scope). For full hardness, use the App mode in the README.');
+  if (expected === ACTIONS_APP_ID) note('standard mode: any workflow can post a check as GitHub Actions, and a same-repo PR\'s workflow can ask for checks: write whatever the default token is. Hard only if agents cannot push workflow files (a token without the "workflow" scope) and existing workflows that run PR code don\'t grant checks: write. For full hardness, use the App mode in the README.');
   const strict = ruleChecks.some((r) => r.parameters?.strict_required_status_checks_policy) || protection?.required_status_checks?.strict;
   if (required.length) say(!!strict, strict ? "branches must be up to date before merging (verdicts can't go stale against a moved base)" : "require branches to be up to date before merging, or a verdict can go stale when the base moves");
   if (protection) say(!!protection.enforce_admins?.enabled, protection.enforce_admins?.enabled ? "admins can't bypass branch protection" : "admins can bypass branch protection: an admin token merges past the gate");
   if (ruleChecks.length) note("rulesets apply: make sure no agent identity is in a ruleset's bypass list (this token can't read bypass lists)");
   const permissions = await api(`repos/${repo}/actions/permissions/workflow`).catch(() => null);
-  if (permissions) say(permissions.default_workflow_permissions === "read", `default workflow token: ${permissions.default_workflow_permissions}${permissions.default_workflow_permissions === "read" ? "" : " (set it to read-only so PR code can't post checks)"}`);
+  if (permissions) say(permissions.default_workflow_permissions === "read", `default workflow token: ${permissions.default_workflow_permissions}${permissions.default_workflow_permissions === "read" ? "" : " (set it to read-only, so existing workflows that run PR code can't post checks unless they ask)"}`);
   let me = null;
   try { me = (await api("user")).login; } catch { /* an App token has no user */ }
   if (me && config && !(config.signers ?? []).length) {
@@ -385,6 +398,7 @@ async function rolloutOk() {
   const result = await evaluate(ctx);
   const reasons = [];
   if (!ctx.pr.merged) reasons.push("the PR is not merged");
+  if (result.skipped) reasons.push(result.skipped);
   if (!result.ok) reasons.push(...result.blockers);
   reasons.push(...(result.rolloutBlockers ?? []).map((a) => `unverified assumption blocks rollout: ${a}`));
   console.log(reasons.length ? `rollout blocked:\n- ${reasons.join("\n- ")}` : `rollout ok: PR #${number} merged, gate green, nothing blocks rollout`);

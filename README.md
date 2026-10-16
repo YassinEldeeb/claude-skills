@@ -30,7 +30,7 @@ flow scales the rigor to the risk. A typo ships with no ceremony. A new backgrou
 |---|---|---|---|
 | 🟢 Small | No risk rule matches the diff | A `## Evidence` section in the PR | Nothing |
 | 🟡 Medium | A medium rule (prompts, model calls, external APIs, deploy config, dependencies, a new module, 500+ lines) | `.flow/tasks/<ID>/task.json`: outcome, typed criteria with checked evidence, a light challenge, independent verification | Nothing, unless it lowers its tier or waives a step |
-| 🔴 High | A high rule (migrations, auth, billing, privacy, workers and queues, bulk jobs, the gate itself) or an unscannable diff | All of medium, plus `design.md`, the full challenge with an independent review, a capacity model with at least one measured number, a safety invariant | `spec@` before code, `ship@` before merge |
+| 🔴 High | A high rule (migrations, auth, billing, privacy, workers and queues, bulk jobs, the gate or any CI workflow) or a diff too large to scan | All of medium, plus `design.md`, the full challenge with an independent review, a capacity model with at least one measured number, a safety invariant | `spec@` before code, `ship@` before merge |
 
 - **The gate** (`.github/workflows/flow.yml`) runs on `pull_request_target` and `issue_comment`. That means it runs the protected branch's code and config, never the PR's. It reads the PR through the API and posts a `flow` check run plus one dashboard comment.
 - **The tier comes from the diff.** A builder can only raise it: lowering needs an `override` approval.
@@ -40,7 +40,7 @@ flow scales the rigor to the risk. A typo ships with no ceremony. A new backgrou
   - Change what was approved and the approval lapses.
   - They count only from `approvers` or `signers` in the protected branch's config, never from agents, bots or edited comments. In **signed mode**, only an SSH signature by a listed key counts, so approvals hold even when agents share a human's GitHub login.
 - **Evidence is checked, not claimed:**
-  - a test ref must exist, not be skipped, live where that kind of test lives, and its suite must have passed on the head;
+  - a test ref must be declared as a test, not be skipped, and live where that kind of test lives; the CI check that runs that kind (`config.verify.<kind>.checks`) must have passed on the head;
   - a critical safety invariant can't be proven by a unit test;
   - an eval counts only after its scorer passes a gold set that's already on the protected branch;
   - a dependency counts only once its own PR merged.
@@ -51,7 +51,7 @@ flow scales the rigor to the risk. A typo ships with no ceremony. A new backgrou
 | Layer | Strength | Bypass needs |
 |---|---|---|
 | `flow` required check, **hardened mode** (your App posts it; key in an environment limited to the protected branch) | Hard | Repo-admin rights, or a human's approval |
-| `flow` required check, standard mode (GitHub Actions posts it) | Hard against mistakes. A deliberately malicious agent with write access could forge a check from a workflow it adds. | That agent pushing a workflow (deny agents the `workflow` scope; set the default token to read-only) |
+| `flow` required check, standard mode (GitHub Actions posts it) | Hard against mistakes. A deliberately malicious agent with write access could forge a check from a workflow it adds. | That agent pushing a workflow file. Deny agents the `workflow` scope: a same-repo PR's workflow can ask for `checks: write` whatever the default token is |
 | Signed approvals | Hard, even with a shared GitHub login | The human's signing key (prefer one that needs a touch) |
 | Login approvals | Hard only if agents have their own GitHub identity | The approver's GitHub session |
 | Hooks (plugin) | Best effort | Ignoring them. They hold high-risk code until the spec is approved, and refuse self-approval, `--admin` merges and protection changes |
@@ -61,8 +61,8 @@ flow scales the rigor to the risk. A typo ships with no ceremony. A new backgrou
 1. Make `flow` a required check, pinned to its source app.
 2. Require branches to be up to date before merging.
 3. Turn on enforce admins, with no agent in any bypass list.
-4. Set the default workflow token to read-only.
-5. Give agents a token without admin or `workflow` scope.
+4. Give agents a token without admin or `workflow` scope; this is what stops a PR from adding a workflow that posts a fake `flow`.
+5. Set the default workflow token to read-only, so existing workflows that run PR code can't post checks unless they ask.
 6. Use signed approvals, or a separate agent identity listed in `agents`.
 
 ### Limits, honestly
