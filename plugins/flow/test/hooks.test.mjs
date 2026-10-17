@@ -8,7 +8,9 @@ import { after, before, describe, test } from "node:test";
 import { CONFIG, task, taskFiles } from "./fixtures.mjs";
 
 const plugin = new URL("..", import.meta.url).pathname;
-const hook = (name, input) => spawnSync("node", [join(plugin, "hooks", name)], { input: JSON.stringify(input), encoding: "utf8" });
+// Every hook run gets its own feedback store: tests must never write to the engineer's real ~/.claude/flow-feedback.
+const testStore = mkdtempSync(join(tmpdir(), "flow-hooks-store-"));
+const hook = (name, input) => spawnSync("node", [join(plugin, "hooks", name)], { input: JSON.stringify(input), encoding: "utf8", env: { ...process.env, FLOW_FEEDBACK_HOME: testStore } });
 let repo;
 const git = (...args) => execFileSync("git", args, { cwd: repo, stdio: "ignore" });
 const write = (path, text) => { mkdirSync(join(repo, path, ".."), { recursive: true }); writeFileSync(join(repo, path), text); };
@@ -113,14 +115,14 @@ describe("session start and the context guard", () => {
     const transcript = join(repo, "t.jsonl");
     const old = new Date(Date.now() - 3 * 60 * 60_000).toISOString();
     writeFileSync(transcript, `${JSON.stringify({ type: "assistant", timestamp: old, message: { usage: { input_tokens: 10, cache_read_input_tokens: 600_000, cache_creation_input_tokens: 0 } } })}\n`);
-    const r = hook("context-guard.mjs", { transcript_path: transcript, session_id: "s" });
+    const r = hook("prompt.mjs", { transcript_path: transcript, session_id: "s" });
     assert.equal(r.status, 0);
     const message = JSON.parse(r.stdout).systemMessage;
     assert.match(message, /idle 180 min with 600k/);
     assert.match(message, /past 500k/);
     const fresh = new Date().toISOString();
     writeFileSync(transcript, `${JSON.stringify({ type: "assistant", timestamp: fresh, message: { usage: { input_tokens: 10, cache_read_input_tokens: 20_000 } } })}\n`);
-    assert.equal(hook("context-guard.mjs", { transcript_path: transcript }).stdout, "");
+    assert.equal(hook("prompt.mjs", { transcript_path: transcript }).stdout, "");
   });
 });
 

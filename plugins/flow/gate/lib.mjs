@@ -40,6 +40,8 @@ const lower = (value) => String(value ?? "").toLowerCase();
 /** Text from task files shown in Markdown: no links, mentions, HTML or table breaks. */
 const esc = (value) => String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/[\\`*_[\]|#~]/g, "\\$&")
   .replace(/(?<!\b(?:spec|ship|override))@|@(?![0-9a-f]{24}\b)/g, "@\u200b").replace(/:\/\//g, ":\u200b//").replace(/www\./gi, "www\u200b.").replace(/[\r\n]+/g, " ");
+// Escaping for any text that did not come from the gate itself (flow-learn uses it for PR bodies).
+export { esc as escapeMarkdown };
 /** A line made of gate text and task text: escape it all, then restore the approval lines the gate itself quotes. */
 const escLine = (line) => esc(line).replace(/\\`(\/flow approve [A-Z][A-Z0-9]*-\d+ (?:spec|ship|override)@[0-9a-f]{24})\\`/g, "`$1`");
 /** Repo paths taken from task data: relative, no empty, "." or ".." segments (they could reach other API endpoints). */
