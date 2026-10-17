@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, test } from "node:test";
 import { validateRules } from "../learn/classify.mjs";
-import { judge, loadCase, runBehavioral, runDeterministic } from "../learn/prove.mjs";
+import { judge, loadCase, runBehavioral, runDeterministic, withoutToolState } from "../learn/prove.mjs";
 import { changedPaths, pathProblems } from "../learn/propose.mjs";
 
 const plugin = new URL("..", import.meta.url).pathname;
@@ -197,5 +197,21 @@ describe("M11: deletion and retention keep their promises", () => {
       cli("delete", "--all");
       assert.equal(JSON.parse(readFileSync(join(home, "config.json"), "utf8")).capture, false);
     } finally { rmSync(home, { recursive: true, force: true }); }
+  });
+});
+
+describe("eval validity: Claude Code's own state is not the agent's work", () => {
+  test("a minimal correct change still passes when .claude/.cc-writes appears (found in the first real Opus runs)", async () => {
+    const c = loadCase("overengineering-health-endpoint");
+    const dir = mkdtempSync(join(tmpdir(), "flow-rv-tool-"));
+    try {
+      cpSync(join(c.dir, c.sandbox ?? "sandbox"), dir, { recursive: true });
+      cpSync(join(c.dir, c.calibration.good), dir, { recursive: true, force: true });
+      mkdirSync(join(dir, ".claude/.cc-writes"), { recursive: true });
+      writeFileSync(join(dir, ".claude/.cc-writes/x"), "tool state");
+      const { score } = await import(join(c.dir, c.scorer ?? "score.mjs"));
+      assert.equal((await score({ dir, result: { result: "" }, ghCalls: [] })).pass, false, "without stripping, the scorer counts the tool's directory");
+      assert.equal((await score({ dir: withoutToolState(dir), result: { result: "" }, ghCalls: [] })).pass, true);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 });

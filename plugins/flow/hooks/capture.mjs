@@ -2,11 +2,11 @@
 // Pure helpers plus small file reads; callers wrap them so a failure never blocks work.
 import { existsSync, readFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
-import { FLOW_VERSION } from "../gate/lib.mjs";
 import { loadSession } from "../learn/store.mjs";
 
 const here = dirname(new URL(import.meta.url).pathname);
-export const PLUGIN_VERSION = FLOW_VERSION;
+// The plugin's version (the gate in repos keeps its own FLOW_VERSION; it didn't change in 2.1).
+export const PLUGIN_VERSION = "2.1.0";
 
 /**
  * A prompt an engineer typed: Claude Code marks it source "user" (verified in 2.1.301's schema). The field may be

@@ -2,12 +2,6 @@
 // No model calls: a lexicon plus guards. Testable, cheap, and immune to instructions hidden in feedback.
 // Its recall is limited by design; `flow-learn report` states precision and recall on a labelled set.
 
-export const CATEGORIES = [
-  "outcome-drift", "overengineering", "architecture", "performance", "decision-latency", "timelines",
-  "instruction-loss", "verification", "unauthorized-action", "communication", "tool-inefficiency", "eval-method",
-  "unclassified",
-];
-
 // [category, key, pattern]. Keys form the fingerprint, so clustering never depends on free text.
 const CORRECTIONS = [
   ["unauthorized-action", "merge", /\b(i (said|told you|asked you)|you were told|didn'?t i (say|tell you))\b[^.?!]{0,40}\b(not?|never|don'?t)\b[^.?!]{0,25}\bmerg/i],

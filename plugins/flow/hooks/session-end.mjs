@@ -10,7 +10,7 @@ import { appendLog, captureAllowed, enqueue, loadSession, safe } from "../learn/
 import { PLUGIN_VERSION, repoFlowConfig, repoOf } from "./capture.mjs";
 
 const here = dirname(new URL(import.meta.url).pathname);
-const MAX_BYTES = 64 * 1024 * 1024;
+const MAX_BYTES = 16 * 1024 * 1024; // larger transcripts are skipped (signals "unavailable"), not loaded into memory
 
 async function readTranscript(path) {
   if (!path || !existsSync(path) || statSync(path).size > MAX_BYTES) return null;

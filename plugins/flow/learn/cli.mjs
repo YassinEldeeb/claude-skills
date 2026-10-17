@@ -6,7 +6,7 @@ import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "no
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { CASES_DIR, baselineTree, calibrate, changedFiles, estimate, judge, loadCase, runBehavioral, runDeterministic, sizeGrowth, treeHash } from "./prove.mjs";
+import { baselineTree, calibrate, changedFiles, estimate, judge, listCases, runBehavioral, runDeterministic, sizeGrowth, treeHash } from "./prove.mjs";
 import { gh, propose, reviewOnly, rollback } from "./propose.mjs";
 import { report } from "./report.mjs";
 import { LOGS, appendLog, config, home, path, queueCounts, readJson, readLog, saveConfig, writeLog } from "./store.mjs";
@@ -56,6 +56,7 @@ const commands = {
     }
     const session = opt("session")?.replace(/[^\w.-]/g, ""), before = opt("before");
     if (!session && !before) throw new Error("delete --all | --session ID | --before YYYY-MM-DD");
+    processQueue(); // first, so a session's still-queued events are deleted too, not re-added afterwards
     const keep = (r) => (session ? r.session !== session : true) && (before ? !(r.at && r.at < before) : true);
     let removed = 0;
     for (const name of LOGS) {
@@ -90,7 +91,7 @@ const commands = {
     const base = opt("base", "origin/master");
     // Cases come from the candidate checkout, so a newly written case is found and existing ones are what it ships.
     const casesDir = join(candidate, "plugins/flow/learn/cases");
-    const all = existsSync(casesDir) ? readdirSync(casesDir).filter((d) => existsSync(join(casesDir, d, "case.json"))).map((d) => loadCase(join(casesDir, d))) : [];
+    const all = listCases(casesDir);
     const named = positional().map((id) => { const c = all.find((x) => x.id === id); if (!c) throw new Error(`no case ${id} in ${casesDir}`); return c; });
     const changed = changedFiles(candidate, base);
     const instructions = changed.some((f) => f.endsWith("SKILL.md") || f.endsWith("rules.md"));
@@ -171,7 +172,6 @@ const commands = {
     }
     print(report());
   },
-  cases() { print(existsSync(CASES_DIR) ? readdirSync(CASES_DIR) : []); },
 };
 const run = commands[command];
 if (!run) { console.log(USAGE); process.exit(command ? 2 : 0); }

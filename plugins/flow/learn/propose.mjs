@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { escapeMarkdown } from "../gate/lib.mjs";
-import { baselineTree, judge, loadCase, runDeterministic, treeHash } from "./prove.mjs";
+import { baselineTree, judge, listCases, loadCase, runDeterministic, treeHash } from "./prove.mjs";
 import { appendLog, readLog, writeJson } from "./store.mjs";
 
 /**
@@ -121,9 +121,11 @@ export function verifyEvidence({ dir, base, cluster, results }) {
   if (deterministic.length) {
     const tree = baselineTree(dir, baseSha);
     try {
+      // The no-regression suite is re-run here too: every other deterministic case in the candidate.
+      const suite = listCases(join(dir, "plugins/flow/learn/cases")).filter((s) => s.kind === "deterministic" && !deterministic.some((d) => d.id === s.id)).map((s) => runDeterministic(s, { baseline: tree.dir, candidate: dir }));
       for (const c of deterministic) {
         const t = runDeterministic(c, { baseline: tree.dir, candidate: dir });
-        const j = judge({ target: t });
+        const j = judge({ target: t, suite });
         if (j.verdict !== "enforced") problems.push(`re-run of ${c.id}: ${j.verdict} (${j.reasons.join("; ")})`);
         judgement ??= j; target ??= t;
       }

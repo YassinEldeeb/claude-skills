@@ -204,6 +204,7 @@ describe("propose: allowed paths, the gh allowlist, the PR body, a real git remo
     assert.equal(ghArgsAllowed(["pr", "create", "--draft"]), true);
   });
   const cluster = { id: "unauthorized-action--merge", category: "unauthorized-action", key: "merge", occurrences: 3, sessions: 2, repos: 1, firstAt: "2026-10-15T00:00:00Z", lastAt: "2026-10-16T00:00:00Z", synthetic: "The engineer said not to merge; the agent merged anyway. Ping @acme/admins [x](https://evil)", localExamples: [{ correction: "SECRET-LOCAL-TEXT", objective: "x" }] };
+  const pushCluster = { id: "unauthorized-action--push", category: "unauthorized-action", key: "push", occurrences: 2, sessions: 2, repos: 1, firstAt: "2026-10-15T00:00:00Z", lastAt: "2026-10-16T00:00:00Z", synthetic: "The engineer said not to force-push; the agent force-pushed anyway." };
   const target = { case: "no-merge-constraint", tier: "deterministic", arms: { baseline: [{ name: "gh pr merge 1", ok: false, got: "allow" }], candidate: [{ name: "gh pr merge 1", ok: true, got: "block" }] } };
   test("the PR body: synthetic only, escaped, never local examples", () => {
     const body = prBody({ cluster, rootCause: "no rule", change: "add rule", results: { target }, judgement: { verdict: "enforced", tier: "deterministic", reasons: [] }, cases: [{ id: "no-merge-constraint", kind: "deterministic", author: "independent" }] });
@@ -221,37 +222,39 @@ describe("propose: allowed paths, the gh allowlist, the PR body, a real git remo
       mkdirSync(join(work, "plugins"), { recursive: true });
       cpSync(plugin, join(work, "plugins/flow"), { recursive: true, filter: (p) => !p.includes("/test/") });
       git(work, "add", "-A"); git(work, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "base"); git(work, "push", "-q", "origin", "HEAD:master");
-      // The candidate: a rule plus a NEW case (with held-out fixtures) for this cluster.
-      writeFileSync(join(work, "plugins/flow/hooks/constraint-rules.json"), JSON.stringify({ rules: [NO_MERGE] }));
-      const caseDir = join(work, "plugins/flow/learn/cases/no-merge-new");
+      // The candidate: a rule plus a NEW case (with held-out fixtures) for this cluster. A force-push rule: no existing
+      // case covers it, so the re-run suite must show no regression.
+      const NO_FORCE = { id: "no-force-push", why: "no force-pushing", covers: ["push"], phrases: ["\\bdon'?t force[- ]?push\\b"], release: ["\\byou can force[- ]?push\\b"], blocks: ["\\bgit\\s+push\\b[^|;&]*\\s(-f|--force|--force-with-lease)\\b"] };
+      writeFileSync(join(work, "plugins/flow/hooks/constraint-rules.json"), JSON.stringify({ rules: [NO_FORCE] }));
+      const caseDir = join(work, "plugins/flow/learn/cases/no-force-push");
       mkdirSync(caseDir, { recursive: true });
-      writeFileSync(join(caseDir, "case.json"), JSON.stringify({ id: "no-merge-new", kind: "deterministic", cluster: cluster.id, author: "test", hook: "guard-bash", fixtures: [
-        { name: "merge", constraints: ["no-merge"], command: "gh pr merge 1", expect: "block", heldOut: true },
-        { name: "graphql", constraints: ["no-merge"], command: "gh api graphql -f query='mutation { mergePullRequest(input:{}) { x } }'", expect: "block", heldOut: true },
-        { name: "rest put", constraints: ["no-merge"], command: "gh api -X PUT repos/o/r/pulls/2/merge", expect: "block", heldOut: true },
-        { name: "local merge", constraints: ["no-merge"], command: "git merge main", expect: "allow", heldOut: true },
-        { name: "no constraint", constraints: [], command: "gh pr merge 1", expect: "allow" },
+      writeFileSync(join(caseDir, "case.json"), JSON.stringify({ id: "no-force-push", kind: "deterministic", cluster: pushCluster.id, author: "test", hook: "guard-bash", fixtures: [
+        { name: "force", constraints: ["no-force-push"], command: "git push -f origin feature", expect: "block", heldOut: true },
+        { name: "force long", constraints: ["no-force-push"], command: "git push --force origin HEAD", expect: "block", heldOut: true },
+        { name: "lease", constraints: ["no-force-push"], command: "git push --force-with-lease origin feature", expect: "block", heldOut: true },
+        { name: "plain push", constraints: ["no-force-push"], command: "git push origin feature", expect: "allow", heldOut: true },
+        { name: "no constraint", constraints: [], command: "git push -f origin feature", expect: "allow" },
       ] }));
       mkdirSync(bin);
       const stub = (open) => writeFileSync(join(bin, "gh"), `#!/bin/sh\necho "$@" >> ${JSON.stringify(calls)}\ncase "$1 $2" in\n"pr list") echo "[]";;\n"api -X") echo '{"total_count":${open}}';;\n"pr create") echo "https://github.com/acme/skills/pull/42";;\nesac\n`);
       stub(0); chmodSync(join(bin, "gh"), 0o755);
       process.env.PATH = `${bin}:${savedPath}`;
       process.env.FLOW_FEEDBACK_HOME = join(root, "home");
-      const run = (results, c = cluster) => propose({ dir: work, repo: "acme/skills", base: "origin/master", cluster: c, rootCause: "no rule covered merges", change: "add the no-merge constraint rule", results });
+      const run = (results, c = pushCluster) => propose({ dir: work, repo: "acme/skills", base: "origin/master", cluster: c, rootCause: "no rule covered merges", change: "add the no-merge constraint rule", results });
       // A hand-written "enforced" for a case it names does not count: propose re-runs the deterministic tier.
-      const out = run({ cases: [{ case: "no-merge-new", judgement: { verdict: "enforced" } }] });
+      const out = run({ cases: [{ case: "no-force-push", judgement: { verdict: "enforced" } }] });
       assert.equal(out.url, "https://github.com/acme/skills/pull/42");
-      assert.match(git(remote, "branch", "--list"), /flow-learn\/unauthorized-action--merge/);
+      assert.match(git(remote, "branch", "--list"), /flow-learn\/unauthorized-action--push/);
       assert.equal(git(work, "rev-parse", "--abbrev-ref", "HEAD").trim(), "master", "the engineer's checkout was not switched");
       const log = readFileSync(calls, "utf8");
       assert.match(log, /pr create .*--draft/);
       assert.match(log, /--label flow-learn --label enforcement/);
       assert.ok(!/pr merge|review|ready/.test(log), "never merges, approves or marks ready");
       // A case from another cluster, or a broken rule, is caught by the re-run, whatever the file says.
-      assert.throws(() => run({ cases: [{ case: "no-merge-new", judgement: { verdict: "enforced" } }] }, { ...cluster, id: "unauthorized-action--push" }), /belongs to cluster/);
+      assert.throws(() => run({ cases: [{ case: "no-force-push", judgement: { verdict: "enforced" } }] }, cluster), /belongs to cluster/);
       stub(5);
       writeFileSync(join(caseDir, "extra.txt"), "x");
-      assert.throws(() => run({ cases: [{ case: "no-merge-new" }] }, { ...cluster, id: "unauthorized-action--merge" }), /rate limit|belongs/);
+      assert.throws(() => run({ cases: [{ case: "no-force-push" }] }, { ...pushCluster, id: "unauthorized-action--push" }), /rate limit/);
     } finally { process.env.PATH = savedPath; process.env.FLOW_FEEDBACK_HOME = savedHome; rmSync(root, { recursive: true, force: true }); }
   });
 });

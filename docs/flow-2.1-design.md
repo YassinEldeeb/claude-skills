@@ -1,6 +1,6 @@
 # flow 2.1: Capture → Understand → Improve → Prove
 
-Status: built in this PR (draft, unmerged). Builds on flow 2.0 (merged as d3ea4c3). A fresh adversarial review of the built code found 4 blockers and 18 majors; the fixes are listed in section 9.
+Status: built (flow 2.1.0). Builds on flow 2.0 (merged as d3ea4c3). A fresh adversarial review of the built code found 4 blockers and 18 majors; the fixes are listed in section 9.
 
 An engineer corrects Claude once. flow 2.1 records it without interrupting work and works out the reusable failure behind it. An engineer then runs one command to draft a focused fix with independently written regression cases. flow 2.1 proves whether the fix works, through the real skill-loading path, before any PR is opened. Nothing reaches the team until a human merges it.
 
@@ -28,7 +28,6 @@ What was cut after the architecture review:
 What was reused from flow 2.0:
 - the Bash guard (constraints plug into it);
 - the rendering and escaping;
-- the task format, since each learn PR carries a `.flow/tasks/LEARN-*` spec;
 - the CI test suite: deterministic regression cases become `node --test` files that CI reruns on every PR.
 
 ## 2. Capture (hook facts verified against Claude Code 2.1.301)
@@ -43,7 +42,7 @@ The facts come from the binary's input schemas and a zero-cost live probe: a Use
 - **Corrections** go through a lexicon of explicit corrections by category, plus implicit ones ("no, that's wrong", "revert that"), which become `unclassified` for `/flow:learn` to investigate.
   - Requirement changes, sarcasm and venting are not failures.
   - Praise is recorded as a positive example only. It never resolves anything.
-- **Constraints:** only imperative constraints about actions are captured: merge, push, deploy, delete, force, spend.
+- **Constraints:** only imperative constraints about actions, defined as rules in `hooks/constraint-rules.json`. **None ship yet** (rules arrive only as proven improvements); spend approval ("approve spend up to $20") is a built-in grant.
   - The phrases live in `hooks/constraint-rules.json`. The hook echoes "constraint noted" and re-injects the active constraints on every prompt as a few tokens of context.
   - A later engineer prompt like "you can merge now" releases one.
   - Enforcement is the flow 2.0 Bash guard, which now checks constraints before its flow-repo check, so it works in any repo. This is labeled **best effort (L)**; GitHub's required checks are the hard layer.
@@ -52,7 +51,6 @@ The facts come from the binary's input schemas and a zero-cost live probe: a Use
   - repeated identical commands;
   - the most edits to one file;
   - "done" claimed after the last edit with no test run since;
-  - whether a correction recurred in the same session.
 
   It stores counts only, never text, plus the model and plugin version recorded at SessionStart.
 - **Stored per correction:**
@@ -109,8 +107,7 @@ A candidate is never judged by the test it was written against alone.
 | Tier | When | Evidence |
 |---|---|---|
 | Deterministic | Enforcement and mechanical cases | The real hook script from the baseline tree and from the candidate tree, on every fixture (blocked, allowed, bypass attempts). No statistics needed. |
-| Behavioral | Instruction changes | `claude -p --plugin-dir <tree>/plugins/flow`: real skill loading and triggering, with the plugin's hooks off (`FLOW_FEEDBACK=off`). The prompts are typed as an engineer would. The sandbox is path-scoped, has no network beyond the API, and has a `gh` stub. The model is the one recorded on the incident unless overridden. N runs per arm per phrasing (default 5). |
-| High impact | Changes to `/flow:start` routing or to enforcement wording | N=10 and a stricter margin |
+| Behavioral | Instruction changes | `claude -p --plugin-dir <tree>/plugins/flow`: real skill loading and triggering, with capture off (`FLOW_FEEDBACK=off`; the guards still run, as in real use). The prompts are typed as an engineer would. The sandbox is path-scoped, has no network beyond the API, and has a `gh` stub. The model is `--model`, else `eval.model` in the config, else sonnet; use the incident's model (in the dossier) to reproduce faithfully. N runs per arm per phrasing (default 5). |
 
 The gate requires all of these:
 1. **Reproduction:** the baseline fails the target case in ≥50% of runs. Otherwise the result is "cannot reproduce", unverified and review-only.
@@ -124,7 +121,7 @@ The gate requires all of these:
 
 ## 6. Propose and roll back
 
-- **One draft PR per cluster,** on branch `flow-learn/<cluster>`, updated as new incidents arrive.
+- **One draft PR per cluster,** on branch `flow-learn/<cluster>`, updated whenever `propose` runs again for that cluster.
   - The tool opens at most 2 new PRs a day and keeps at most 5 open, both counted from GitHub (`label:flow-learn`) rather than from local state.
   - The body holds:
     - the synthetic reproduction (no real excerpts);

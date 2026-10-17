@@ -36,7 +36,7 @@ export function loadCase(idOrDir) {
   const spec = JSON.parse(readFileSync(join(dir, "case.json"), "utf8"));
   return { ...spec, dir };
 }
-export const listCases = () => (existsSync(CASES_DIR) ? readdirSync(CASES_DIR).filter((d) => existsSync(join(CASES_DIR, d, "case.json"))).map(loadCase) : []);
+export const listCases = (dir = CASES_DIR) => (existsSync(dir) ? readdirSync(dir).filter((d) => existsSync(join(dir, d, "case.json"))).map((d) => loadCase(join(dir, d))) : []);
 
 // ---------- deterministic tier ----------
 
@@ -184,6 +184,15 @@ export function runOnce(testCase, prompt, tree, { model, maxTurns = 25 }) {
   return { dir, stub, result, ghCalls, ms: Date.now() - started };
 }
 
+/**
+ * Claude Code writes its own state into the working directory (`.claude/`, e.g. `.claude/.cc-writes` for sandboxed
+ * writes). It is the tool's, not the agent's work: removed before scoring, or every case would see a stray directory.
+ */
+export function withoutToolState(dir) {
+  rmSync(join(dir, ".claude"), { recursive: true, force: true });
+  return dir;
+}
+
 export async function runBehavioral(testCase, { baseline, candidate, runs, model, budget, spent = { usd: 0 } }) {
   const score = await scorer(testCase);
   const arms = { baseline: [], candidate: [] };
@@ -200,7 +209,7 @@ export async function runBehavioral(testCase, { baseline, candidate, runs, model
           const tokens = (u.output_tokens ?? 0) + (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0);
           // A run that errored or never took a turn says nothing about behavior: excluded, not scored as a failure.
           if (run.result.is_error || !run.result.num_turns) { arms[arm].push({ prompt: prompt.id, heldOut: !!prompt.heldOut, error: String(run.result.result ?? "no result").slice(0, 200), usd, ms: run.ms }); continue; }
-          const verdict = await score({ dir: run.dir, result: run.result, ghCalls: run.ghCalls });
+          const verdict = await score({ dir: withoutToolState(run.dir), result: run.result, ghCalls: run.ghCalls });
           if (verdict.scorerError) { arms[arm].push({ prompt: prompt.id, heldOut: !!prompt.heldOut, error: verdict.details, usd, ms: run.ms }); continue; }
           arms[arm].push({ prompt: prompt.id, heldOut: !!prompt.heldOut, pass: verdict.pass, details: verdict.details, usd, ms: run.ms, turns: run.result.num_turns, tokens: tokens || null });
         } finally { rmSync(run.dir, { recursive: true, force: true }); rmSync(run.stub, { recursive: true, force: true }); }
@@ -308,4 +317,3 @@ export function treeHash(dir) {
 export const changedFiles = (candidate, ref) => execFileSync("git", ["-C", candidate, "diff", "--name-only", ref], { encoding: "utf8" }).split("\n").filter(Boolean)
   .concat(execFileSync("git", ["-C", candidate, "ls-files", "--others", "--exclude-standard"], { encoding: "utf8" }).split("\n").filter(Boolean));
 
-export const relativeTo = (root, path) => relative(root, path);

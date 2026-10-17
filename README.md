@@ -125,7 +125,7 @@ Explicit corrections like the examples above are caught; implicit ones ("no, use
 - Only prompts an engineer typed are captured: Claude Code's `source: "user"`, or an attended session. `/loop`, SDK, headless and eval runs never count.
 - A field containing a secret is dropped, not redacted. Tool arguments, files and diffs are never stored.
 - Everything stays local (`~/.claude/flow-feedback`, mode 0600, 30-day retention), with a one-time notice.
-- `flow-learn status | inspect | delete | disable` are the engineer's controls; the hooks refuse to let an agent use them or touch the store. That refusal is best effort: a determined agent could find a command the patterns miss. `delete --all` keeps your capture setting.
+- `flow-learn status | inspect | delete | disable` are the engineer's controls; the hooks refuse to let an agent run `disable`, `enable` or `delete`, or touch the store. That refusal is best effort: a determined agent could find a command the patterns miss. `delete --all` keeps your capture setting.
 - A repo can require opt-in with `"learn": {"capture": "opt-in"}` in `.flow/config.json`.
 - There is no team aggregation yet: lessons reach the team only as reviewed PRs.
 
@@ -137,7 +137,7 @@ Explicit corrections like the examples above are caught; implicit ones ("no, use
 - Behavioral evals need spend approval, recorded from your own prompt ("approve spend up to $20"); the hooks refuse `--approve-spend` without it.
 
 ```bash
-node plugins/flow/learn/cli.mjs report            # what flow learned, every number labelled measured/estimated/unavailable
+node plugins/flow/learn/cli.mjs report            # from a checkout; an installed plugin's CLI is in ~/.claude/plugins/cache/…/flow/<version>/learn/cli.mjs
 node docs/demo/flow-2.1/run.mjs                   # three incidents end to end (no model calls)
 python3 docs/demo/flow-2.1/live-capture.py        # capture inside a real interactive Claude Code session, at $0
 ```
