@@ -43,7 +43,8 @@ try {
   const input = JSON.parse(text);
   const system = safe(() => contextWarning(input.transcript_path), null);
   const context = [];
-  const human = typedByEngineer(input) && !isAutomated(input.prompt);
+  // No prompt text, nothing to record (and nothing to note or count).
+  const human = typeof input.prompt === "string" && input.prompt.trim() !== "" && typedByEngineer(input) && !isAutomated(input.prompt);
 
   if (human) {
     safe(() => {

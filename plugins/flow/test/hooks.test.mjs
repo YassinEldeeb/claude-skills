@@ -8,7 +8,9 @@ import { after, before, describe, test } from "node:test";
 import { CONFIG, task, taskFiles } from "./fixtures.mjs";
 
 const plugin = new URL("..", import.meta.url).pathname;
-const hook = (name, input) => spawnSync("node", [join(plugin, "hooks", name)], { input: JSON.stringify(input), encoding: "utf8" });
+// Every hook run gets its own feedback store: tests must never write to the engineer's real ~/.claude/flow-feedback.
+const testStore = mkdtempSync(join(tmpdir(), "flow-hooks-store-"));
+const hook = (name, input) => spawnSync("node", [join(plugin, "hooks", name)], { input: JSON.stringify(input), encoding: "utf8", env: { ...process.env, FLOW_FEEDBACK_HOME: testStore } });
 let repo;
 const git = (...args) => execFileSync("git", args, { cwd: repo, stdio: "ignore" });
 const write = (path, text) => { mkdirSync(join(repo, path, ".."), { recursive: true }); writeFileSync(join(repo, path), text); };
