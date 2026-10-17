@@ -1,6 +1,6 @@
 # flow 2.1: Capture → Understand → Improve → Prove
 
-Status: built in this PR (draft, unmerged). Builds on flow 2.0 (merged as d3ea4c3).
+Status: built in this PR (draft, unmerged). Builds on flow 2.0 (merged as d3ea4c3). A fresh adversarial review of the built code found 4 blockers and 18 majors; the fixes are listed in section 9.
 
 An engineer corrects Claude once. flow 2.1 records it without interrupting work and works out the reusable failure behind it. An engineer then runs one command to draft a focused fix with independently written regression cases. flow 2.1 proves whether the fix works, through the real skill-loading path, before any PR is opened. Nothing reaches the team until a human merges it.
 
@@ -155,3 +155,19 @@ The shared git branch was removed: it had self-asserted identities, couldn't del
 - lexicon precision and recall on the synthetic labelled set.
 
 Every number is labeled measured, estimated, synthetic or unavailable. First-attempt success and time to a verified outcome are unavailable without outcome labels.
+
+## 9. Adversarial review of the build: what changed
+
+| Finding | Fix |
+|---|---|
+| B1: `propose` trusted any results file | `propose` re-runs deterministic cases itself; behavioral results must match the candidate's tree hash and base; every case must belong to the cluster |
+| B2: a case could pick the hook script and fake "enforced" | Hook names are allowlisted; both arms run the baseline's trusted hook code, and only the constraint rules (data) differ |
+| B3: one bad regex disabled the whole Bash guard | Rules compile one by one (invalid ones are skipped); the constraint check runs last in its own block; `validateRules` (invalid, empty-matching, over-broad) fails such a candidate and is checked in CI |
+| B4: renames and staged changes slipped past the path check | Paths come with renames off, from the working tree, the index and untracked files; the commit is built from a temporary index with only the vetted files (the engineer's checkout is never switched) |
+| M1: the evaluator was writable | Existing cases are immutable; only new case directories; `learn/enforced.json` may only gain ids, and CI runs every enforced case |
+| M2, M3: case code and answers | Scorers run in a child process with a scrubbed environment; the agent under test gets a plugin copy without `learn/`, a temporary store, a scrubbed environment, and reads scoped to its sandbox |
+| M4, M5: errors and the suite | Errored or zero-turn runs are excluded; over 20% errors means invalid; the arms interleave; the suite always runs, and a missing suite case blocks the verdict |
+| M6: "held-out" was self-asserted | ≥3 held-out fixtures; every no-merge set the fix author has seen is relabelled as not held out |
+| M7: spend was a flag | Spend approval comes from the engineer's prompt, and the Bash guard refuses `--approve-spend` above it |
+| M8: VS Code prompts arrive as `source: "sdk"` | Accepted when the session is attended and the entrypoint is the VS Code or Desktop app |
+| M11–M18 | Retention covers every log and dead events; `delete --all` keeps the config; the notice is a `systemMessage`; signals reset on edits; latency and classifier claims are stated as measured; `report --refresh` tracks merged and reverted PRs; more secret patterns |

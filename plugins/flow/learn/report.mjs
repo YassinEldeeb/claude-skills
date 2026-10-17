@@ -55,7 +55,7 @@ export function report() {
     ["Clusters (actionable)", `${clusters.length} (${clusters.filter((c) => c.actionable).length})`, "measured"],
     ["Proposals: review-only / proposed / merged / reverted", `${states["review-only"] ?? 0} / ${states.proposed ?? 0} / ${merged} / ${reverted}`, "measured (local ledger; `report --refresh` reads PR states)"],
     ["Regression rate (reverted / merged)", merged ? `${reverted}/${merged}` : "unavailable", merged ? "measured" : "nothing merged yet"],
-    ["Prompt hook latency p50 / p95", latency.length ? `${quantile(latency, 0.5)} ms / ${quantile(latency, 0.95)} ms` : "unavailable", latency.length ? `measured over ${latency.length} prompts` : "no prompts recorded"],
+    ["Prompt hook latency p50 / p95", latency.length ? `${quantile(latency, 0.5)} ms / ${quantile(latency, 0.95)} ms` : "unavailable", latency.length ? `measured inside the hook over ${latency.length} prompts, module loading included; Node's own startup (tens of ms, more under load) comes on top` : "no prompts recorded"],
     ["Eval spend", evals.length ? `$${evals.reduce((s, e) => s + (e.usd ?? 0), 0).toFixed(2)} over ${evals.length} prove run(s)` : "$0 (no behavioral evals run)", "measured (result JSON)"],
     ["First-attempt task success", "unavailable", "needs outcome labels flow does not collect"],
     ["Time to verified outcome", "unavailable", "needs outcome labels flow does not collect"],

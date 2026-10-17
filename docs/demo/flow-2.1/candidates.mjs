@@ -57,9 +57,10 @@ export const CANDIDATES = {
       const rules = JSON.parse(readFileSync(file, "utf8"));
       rules.rules = [...rules.rules.filter((r) => r.id !== "no-merge"), NO_MERGE_RULE];
       writeFileSync(file, `${JSON.stringify(rules, null, 2)}\n`);
-      const caseFile = join(tree, "plugins/flow/learn/cases/no-merge-constraint/case.json");
-      const testCase = JSON.parse(readFileSync(caseFile, "utf8"));
-      writeFileSync(caseFile, `${JSON.stringify({ ...testCase, enforced: true }, null, 2)}\n`);
+      // Existing cases are immutable for an improvement; enforcement is recorded by adding ids to learn/enforced.json.
+      const enforcedFile = join(tree, "plugins/flow/learn/enforced.json");
+      const enforced = JSON.parse(readFileSync(enforcedFile, "utf8"));
+      writeFileSync(enforcedFile, `${JSON.stringify([...new Set([...enforced, "no-merge-constraint"])], null, 2)}\n`);
     },
   },
   "outcome-drift--proxy-data": {

@@ -11,6 +11,7 @@ try {
   const root = repoRoot(input.cwd || process.env.CLAUDE_PROJECT_DIR || process.cwd());
   // flow 2.1, in any repo: remember the model for this session's events; re-ground constraints after /compact or resume;
   // tell the engineer once that corrections are recorded locally.
+  let notice = null;
   const learnLines = safe(() => {
     const lines = [];
     const attended = typedByEngineer({ source: null });
@@ -19,16 +20,21 @@ try {
     if (input.model) session.model = input.model;
     const constraints = activeConstraints(input.session_id);
     if (constraints.length && ["compact", "resume"].includes(input.source)) lines.push(`[flow] Constraints the engineer set this session still hold: ${describeConstraints(constraints, constraintRules()).join("; ")}.`);
-    if (captureAllowed(repoFlowConfig(root)) && !safe(() => loadSession("_notice").shown, false)) {
-      lines.push("[flow] flow records corrections and session signals locally to improve its skills (redacted, nothing leaves this machine). The engineer can run `node <flow plugin>/learn/cli.mjs disable` to turn it off. Mention this once.");
+    if (captureAllowed(repoFlowConfig(root), root ? root.split("/").pop() : null) && !safe(() => loadSession("_notice").shown, false)) {
+      // Shown to the engineer (systemMessage), not left for the model to relay.
+      notice = "[flow] flow records your corrections and session signals locally to improve its skills (redacted; nothing leaves this machine). Turn it off with: node <flow plugin>/learn/cli.mjs disable";
       saveSession("_notice", { shown: new Date().toISOString() });
     }
     saveSession(input.session_id, session);
     return lines;
   }, []);
   const flow = loadFlow(root);
+  const emit = (lines) => {
+    if (notice) process.stdout.write(JSON.stringify({ systemMessage: notice, ...(lines.length ? { hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: lines.join("\n") } } : {}) }));
+    else if (lines.length) process.stdout.write(`${lines.join("\n")}\n`);
+  };
   if (!flow) {
-    if (learnLines.length) process.stdout.write(`${learnLines.join("\n")}\n`);
+    emit(learnLines);
     // A flow 1.x repo: say how to upgrade, once per session.
     if (root && existsSync(join(root, "status.md")) && existsSync(join(root, "decisions.md")) && existsSync(join(root, ".github/flow/check.mjs"))) {
       process.stdout.write(`[flow] This repo uses flow 1.x (status.md, decisions.md). The installed plugin is ${FLOW_VERSION}: run /flow:install to upgrade.\n`);
@@ -49,7 +55,7 @@ try {
   const repoLib = join(root, ".github/flow/lib.mjs");
   const repoVersion = existsSync(repoLib) ? /FLOW_VERSION = "([^"]+)"/.exec(readFileSync(repoLib, "utf8"))?.[1] : null;
   if (repoVersion && repoVersion !== FLOW_VERSION) lines.push(`[flow] The repo's gate is ${repoVersion}, the plugin is ${FLOW_VERSION}: run /flow:install to upgrade the gate (in its own PR).`);
-  process.stdout.write(`${[...learnLines, ...lines].join("\n")}\n`);
+  emit([...learnLines, ...lines]);
 } catch {
   process.exit(0);
 }

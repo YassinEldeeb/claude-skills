@@ -13,7 +13,7 @@ beforeEach(() => { home = mkdtempSync(join(tmpdir(), "flow-learn-")); process.en
 afterEach(() => { rmSync(home, { recursive: true, force: true }); });
 const store = () => import(`../learn/store.mjs?${Math.random()}`);
 const worker = () => import(`../learn/worker.mjs?${Math.random()}`);
-const hook = (name, input, env = {}) => spawnSync(process.execPath, [join(plugin, "hooks", name)], { input: JSON.stringify(input), encoding: "utf8", env: { ...process.env, FLOW_FEEDBACK_HOME: home, CLAUDE_CODE_SESSION_ATTENDED: "1", ...env } });
+const hook = (name, input, env = {}) => spawnSync(process.execPath, [join(plugin, "hooks", name)], { input: JSON.stringify(input), encoding: "utf8", env: { ...process.env, FLOW_FEEDBACK_HOME: home, CLAUDE_CODE_SESSION_ATTENDED: "1", CLAUDE_CODE_ENTRYPOINT: "cli", ...env } });
 const queued = () => (existsSync(join(home, "queue/pending")) ? readdirSync(join(home, "queue/pending")).filter((n) => n.endsWith(".json")).map((n) => JSON.parse(readFileSync(join(home, "queue/pending", n), "utf8"))) : []);
 const NO_MERGE = { id: "no-merge", why: "do not merge pull requests until the engineer says so", covers: ["merge"], phrases: ["\\b(don'?t|do not|no)\\b[^.?!]{0,30}\\bmerg"], release: ["\\byou can merge\\b"], blocks: ["\\bgh\\b[\\s\\S]*\\bpr\\s+merge\\b"] };
 const rulesFile = () => { const f = join(home, "rules.json"); writeFileSync(f, JSON.stringify({ rules: [NO_MERGE] })); return f; };
@@ -109,11 +109,11 @@ describe("capture through the real prompt hook", () => {
     assert.equal(run.status, 0);
   });
   test("an opt-in repo captures nothing until the engineer enables it", async () => {
-    const repo = join(home, "repo"); mkdirSync(join(repo, ".git"), { recursive: true }); mkdirSync(join(repo, ".flow"));
+    const repo = join(home, "repo"); mkdirSync(join(repo, ".flow"), { recursive: true }); spawnSync("git", ["init", "-q"], { cwd: repo });
     writeFileSync(join(repo, ".flow/config.json"), JSON.stringify({ learn: { capture: "opt-in" } }));
     hook("prompt.mjs", { session_id: "s2", cwd: repo, prompt: "Stop overengineering", source: "user" });
     assert.equal(queued().length, 0);
-    spawnSync(process.execPath, [join(plugin, "learn/cli.mjs"), "enable"], { env: { ...process.env, FLOW_FEEDBACK_HOME: home } });
+    spawnSync(process.execPath, [join(plugin, "learn/cli.mjs"), "enable"], { cwd: repo, env: { ...process.env, FLOW_FEEDBACK_HOME: home } });
     hook("prompt.mjs", { session_id: "s2", cwd: repo, prompt: "Stop overengineering", source: "user" });
     assert.equal(queued().length, 1);
   });
@@ -211,14 +211,19 @@ describe("session end: signals from the transcript, counts only", () => {
       tool("2", "Bash", { command: "npm test" }), result("2", true),
       tool("3", "Bash", { command: "npm test" }), result("3", true),
       tool("4", "Bash", { command: "npm test" }), result("4", false),
+      ...[6, 7, 8, 9, 10].flatMap((n) => [tool(String(n), "Bash", { command: "curl -s localhost:3000/health" }), result(String(n), false)]),
       tool("5", "Edit", { file_path: "src/a.ts" }), result("5", false),
       say("All tests pass, it's done."),
     ];
     const signals = transcriptSignals(records);
     assert.equal(signals.failingTestStreak, 3);
-    assert.equal(signals.repeatedCommand, 4);
+    assert.equal(signals.repeatedCommand, 5, "test commands and routine reads don't count as repetition");
     assert.equal(signals.unverifiedCompletion, true, "claimed done after the last edit with no test since");
     assert.deepEqual(signalIncidents(signals).map((i) => i.keys[0]).sort(), ["failing-test-streak", "repeated-command", "unverified-claim"]);
+  });
+  test("an edit between failing runs is a change of approach, not a streak", () => {
+    const records = [tool("1", "Bash", { command: "npm test" }), result("1", true), tool("2", "Edit", { file_path: "a.ts" }), result("2"), tool("3", "Bash", { command: "npm test" }), result("3", true), tool("4", "Edit", { file_path: "a.ts" }), result("4"), tool("5", "Bash", { command: "npm test" }), result("5", true)];
+    assert.equal(transcriptSignals(records).failingTestStreak, 1);
   });
   test("a session without a transcript is recorded with signals unavailable, never invented", () => {
     const run = hook("session-end.mjs", { session_id: "s9", cwd: home, transcript_path: join(home, "missing.jsonl"), reason: "other" });

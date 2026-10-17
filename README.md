@@ -98,7 +98,7 @@ Correct Claude once. flow records the correction, finds the reusable failure beh
 
 | Stage | How | Cost |
 |---|---|---|
-| **Capture** | `UserPromptSubmit` records corrections you type ("stop overengineering", "I said no merges", "why didn't you query the real data?"), and praise. `SessionEnd` derives counts from the local transcript: failing-test streaks, repeated commands, "done" with no test after the last edit. | No model calls; ~10–30 ms per prompt (measured) |
+| **Capture** | `UserPromptSubmit` records corrections you type ("stop overengineering", "I said no merges", "why didn't you query the real data?"), and praise. `SessionEnd` derives counts from the local transcript: failing-test streaks with no code change in between, repeated non-routine commands, "done" with no test after the last edit. | No model calls. Measured inside the hook: 10–30 ms. Node's own startup comes on top; a reviewer measured 79–367 ms wall time on a heavily loaded laptop. |
 | **Understand** | A deterministic worker clusters incidents by (category, owning skill section or rule). It writes a dossier per cluster, with a synthetic description and no engineer text. | Local |
 | **Improve** | `/flow:learn <cluster>`, run explicitly. It finds the root cause, an independent subagent writes regression cases (with held-out phrasings and bypass attempts), then the smallest fix is made in allowed files only. | Your session's tokens |
 | **Prove** | `flow-learn prove`. Enforcement runs the real hooks from the baseline and the candidate. Behavior runs `claude -p --plugin-dir` (real skill loading) N times per arm, and only with `--approve-spend --budget-usd`. | Free / budgeted |
@@ -107,18 +107,25 @@ Correct Claude once. flow records the correction, finds the reusable failure beh
 The effectiveness gate requires all of these:
 - the baseline reproduces the failure;
 - the scorer separates its known-good and known-bad end states;
-- the held-out phrasing improves beyond noise (90% interval);
-- no other case regresses;
-- tokens and skill size stay within budget;
-- results come from real plugin loading.
+- improvement on held-out cases the fix author never saw (≥3 fixtures, or the held-out phrasing beyond noise at 90%);
+- the whole suite runs and no other case regresses;
+- under 20% errored runs;
+- tokens and skill size within budget;
+- results from real plugin loading.
 
-Anything else is `cannot-reproduce`, `inconclusive`, `regressed` or `not-run`, and becomes a local review-only proposal.
+Anything else is `rejected`, `cannot-reproduce`, `inconclusive`, `regressed`, `invalid` or `not-run`, and becomes a local review-only proposal. `propose` doesn't trust a results file: it re-runs the deterministic cases itself, and matches behavioral results to the candidate's tree hash. An improvement may add new cases, but can never edit existing ones.
+
+**What capture catches (measured on a 218-prompt labelled set written independently):**
+- corrections: precision 1.00, **recall 0.21**. The lexicon catches about one correction in five, and what it catches is right;
+- category accuracy is 0.18 across all labelled corrections.
+
+Explicit corrections like the examples above are caught; implicit ones ("no, use billing") mostly aren't. `flow-learn report` prints these numbers next to every rate.
 
 **Privacy:**
 - Only prompts an engineer typed are captured: Claude Code's `source: "user"`, or an attended session. `/loop`, SDK, headless and eval runs never count.
 - A field containing a secret is dropped, not redacted. Tool arguments, files and diffs are never stored.
 - Everything stays local (`~/.claude/flow-feedback`, mode 0600, 30-day retention), with a one-time notice.
-- `flow-learn status | inspect | delete | disable` are the engineer's controls; the hooks refuse to let an agent use them or touch the store.
+- `flow-learn status | inspect | delete | disable` are the engineer's controls; the hooks refuse to let an agent use them or touch the store. That refusal is best effort: a determined agent could find a command the patterns miss. `delete --all` keeps your capture setting.
 - A repo can require opt-in with `"learn": {"capture": "opt-in"}` in `.flow/config.json`.
 - There is no team aggregation yet: lessons reach the team only as reviewed PRs.
 
@@ -126,6 +133,8 @@ Anything else is `cannot-reproduce`, `inconclusive`, `regressed` or `not-run`, a
 - An improvement may change only skills, `templates/rules.md`, constraint rules (data) and regression cases. `propose` refuses gates, hook code, its own harness, workflows and config.
 - Its `gh` wrapper can't merge, approve, mark ready or write to the API.
 - Session constraints ("don't merge") are enforced by the Bash guard on a best-effort basis; GitHub's required checks remain the hard layer.
+- **No constraint rules ship yet.** The engine is there, but rules arrive only as proven improvements. The demo's no-merge rule handled every command in five cases, then missed one phrasing in its fourth unseen round, so the gate rejected it ([results](docs/demo/flow-2.1/RESULTS.md)).
+- Behavioral evals need spend approval, recorded from your own prompt ("approve spend up to $20"); the hooks refuse `--approve-spend` without it.
 
 ```bash
 node plugins/flow/learn/cli.mjs report            # what flow learned, every number labelled measured/estimated/unavailable

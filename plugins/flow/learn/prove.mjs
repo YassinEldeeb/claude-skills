@@ -6,6 +6,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
+import { validateRules } from "./classify.mjs";
 
 const learnDir = dirname(new URL(import.meta.url).pathname);
 export const CASES_DIR = join(learnDir, "cases");
@@ -39,27 +40,35 @@ export const listCases = () => (existsSync(CASES_DIR) ? readdirSync(CASES_DIR).f
 
 // ---------- deterministic tier ----------
 
-const hookPath = (tree, hook) => join(tree, "plugins/flow/hooks", `${hook}.mjs`);
+const HOOKS = ["guard-bash", "guard-edit", "prompt"];
+const hookPath = (tree, hook) => {
+  if (!HOOKS.includes(hook)) throw new Error(`a case may only exercise ${HOOKS.join(", ")} (got ${JSON.stringify(hook)})`);
+  return join(tree, "plugins/flow/hooks", `${hook}.mjs`);
+};
+export const rulesOf = (tree) => { try { return JSON.parse(readFileSync(join(tree, "plugins/flow/hooks/constraint-rules.json"), "utf8")).rules ?? []; } catch { return null; } };
 
-/** Run one fixture against one tree's real hooks in a throwaway store. Returns { ok, got }. */
-export function runFixture(tree, fixture, { hook = "guard-bash" } = {}) {
+/**
+ * Run one fixture in a throwaway store. The hook code always comes from `codeTree` (trusted: the baseline), and only
+ * the constraint rules (data, the one thing an improvement may change here) come from `rulesTree`. Returns { ok, got }.
+ */
+export function runFixture(codeTree, fixture, { hook = "guard-bash", rulesTree = codeTree } = {}) {
   const home = mkdtempSync(join(tmpdir(), "flow-prove-"));
   const cwd = mkdtempSync(join(tmpdir(), "flow-prove-cwd-"));
   try {
-    const env = { ...process.env, FLOW_FEEDBACK_HOME: home, CLAUDE_CODE_SESSION_ATTENDED: "1" };
-    delete env.FLOW_FEEDBACK; delete env.FLOW_CONSTRAINT_RULES;
+    const env = { ...process.env, FLOW_FEEDBACK_HOME: home, CLAUDE_CODE_SESSION_ATTENDED: "1", FLOW_CONSTRAINT_RULES: join(rulesTree, "plugins/flow/hooks/constraint-rules.json") };
+    delete env.FLOW_FEEDBACK;
     const session = "prove";
     mkdirSync(join(home, "sessions"), { recursive: true });
     writeFileSync(join(home, "sessions", `${session}.json`), JSON.stringify({ constraints: fixture.constraints ?? [] }));
     for (const prompt of fixture.prompts ?? []) {
-      spawnSync(process.execPath, [hookPath(tree, "prompt")], { input: JSON.stringify({ session_id: session, cwd, prompt, source: "user", hook_event_name: "UserPromptSubmit" }), env, encoding: "utf8", timeout: 20_000 });
+      spawnSync(process.execPath, [hookPath(codeTree, "prompt")], { input: JSON.stringify({ session_id: session, cwd, prompt, source: "user", hook_event_name: "UserPromptSubmit" }), env, encoding: "utf8", timeout: 20_000 });
     }
     if (fixture.expectActive) {
       const active = JSON.parse(readFileSync(join(home, "sessions", `${session}.json`), "utf8")).constraints ?? [];
       const ok = JSON.stringify([...active].sort()) === JSON.stringify([...fixture.expectActive].sort());
       return { ok, got: `active: [${active.join(", ")}]` };
     }
-    const run = spawnSync(process.execPath, [hookPath(tree, fixture.hook ?? hook)], { input: JSON.stringify({ session_id: session, cwd, tool_name: "Bash", tool_input: { command: fixture.command }, hook_event_name: "PreToolUse" }), env, encoding: "utf8", timeout: 20_000 });
+    const run = spawnSync(process.execPath, [hookPath(codeTree, fixture.hook ?? hook)], { input: JSON.stringify({ session_id: session, cwd, tool_name: "Bash", tool_input: { command: fixture.command }, hook_event_name: "PreToolUse" }), env, encoding: "utf8", timeout: 20_000 });
     const got = run.status === 2 ? "block" : "allow";
     return { ok: got === fixture.expect, got };
   } finally {
@@ -69,11 +78,18 @@ export function runFixture(tree, fixture, { hook = "guard-bash" } = {}) {
 }
 
 export function runDeterministic(testCase, { baseline, candidate }) {
-  const arms = {};
+  const arms = {}, ruleErrors = {};
   for (const [arm, tree] of Object.entries({ baseline, candidate })) {
-    arms[arm] = testCase.fixtures.map((fixture) => ({ name: fixture.name ?? fixture.command ?? fixture.prompts?.join(" / "), heldOut: !!fixture.heldOut, ...runFixture(tree, fixture, testCase) }));
+    const rules = rulesOf(tree);
+    ruleErrors[arm] = rules === null ? ["constraint-rules.json is missing or not JSON"] : validateRules(rules);
+    arms[arm] = testCase.fixtures.map((fixture) => {
+      const name = fixture.name ?? fixture.command ?? fixture.prompts?.join(" / ");
+      // Invalid or over-broad rules fail every fixture of that arm: they would disable or jam the guard in real use.
+      if (ruleErrors[arm].length) return { name, heldOut: !!fixture.heldOut, ok: false, got: "invalid rules" };
+      return { name, heldOut: !!fixture.heldOut, ...runFixture(baseline, fixture, { hook: testCase.hook, rulesTree: tree }) };
+    });
   }
-  return { case: testCase.id, tier: "deterministic", arms };
+  return { case: testCase.id, tier: "deterministic", arms, ruleErrors };
 }
 
 // ---------- behavioral tier ----------
@@ -106,8 +122,16 @@ function sandboxFor(testCase, overlay) {
   return dir;
 }
 
+/** A case's scorer is code from a case directory: run it in a child process, scrubbed environment, time limit. */
+const SCRUBBED = () => ({ PATH: "/usr/bin:/bin:/usr/sbin:/sbin:" + dirname(process.execPath), HOME: mkdtempSync(join(tmpdir(), "flow-score-home-")), LANG: "C" });
 async function scorer(testCase) {
-  return (await import(join(testCase.dir, testCase.scorer ?? "score.mjs"))).score;
+  const file = join(testCase.dir, testCase.scorer ?? "score.mjs");
+  if (relative(testCase.dir, file).startsWith("..")) throw new Error("the scorer must live in its case directory");
+  return async ({ dir, result, ghCalls }) => {
+    const script = `const { score } = await import(${JSON.stringify(file)}); const input = JSON.parse(process.argv[1]); process.stdout.write(JSON.stringify(await score(input)));`;
+    const run = spawnSync(process.execPath, ["--input-type=module", "-e", script, JSON.stringify({ dir, result: { result: result?.result ?? "" }, ghCalls })], { encoding: "utf8", timeout: 120_000, env: SCRUBBED(), cwd: dir });
+    try { return JSON.parse(run.stdout); } catch { return { pass: false, details: `scorer failed: ${(run.stderr || "no output").slice(0, 200)}`, scorerError: true }; }
+  };
 }
 
 /** The scorer must pass the known-good end state and fail the known-bad one, or no behavioral result counts. */
@@ -122,8 +146,18 @@ export async function calibrate(testCase) {
 }
 
 /** One headless run: real plugin loading from `tree`, a scoped sandbox, a gh stub, capture off. */
+/** The plugin as the agent under test sees it: everything but learn/ (cases, scorers and calibration answers). */
+function pluginCopy(tree) {
+  const dir = mkdtempSync(join(tmpdir(), "flow-plugin-"));
+  const src = join(tree, "plugins/flow");
+  cpSync(src, dir, { recursive: true, filter: (p) => !/^(learn|test)(\/|$)/.test(relative(src, p)) });
+  return dir;
+}
+
 export function runOnce(testCase, prompt, tree, { model, maxTurns = 25 }) {
   const dir = sandboxFor(testCase);
+  const plugin = pluginCopy(tree);
+  const store = mkdtempSync(join(tmpdir(), "flow-eval-store-"));
   const stub = mkdtempSync(join(tmpdir(), "flow-ghstub-"));
   const ghLog = join(stub, "gh.log");
   writeFileSync(join(stub, "gh"), `#!/bin/sh\necho "$@" >> "${ghLog}"\necho "stub: gh is not available in this sandbox"\n`);
@@ -131,16 +165,19 @@ export function runOnce(testCase, prompt, tree, { model, maxTurns = 25 }) {
   const settings = join(stub, "settings.json");
   writeFileSync(settings, JSON.stringify({ sandbox: { enabled: true, network: { allowedDomains: [] } } }));
   const args = [
-    "-p", "--model", model, "--plugin-dir", join(tree, "plugins/flow"), "--setting-sources", "local", "--strict-mcp-config",
+    "-p", "--model", model, "--plugin-dir", plugin, "--setting-sources", "local", "--strict-mcp-config",
     "--settings", settings, "--permission-mode", "dontAsk", "--max-turns", String(maxTurns), "--output-format", "json",
-    "--allowedTools", "Read", "Glob", "Grep", "Skill", "Bash", `Write(//${dir.replace(/^\//, "")}/**)`, `Edit(//${dir.replace(/^\//, "")}/**)`,
+    "--allowedTools", "Skill", "Bash", ...["Read", "Glob", "Grep", "Write", "Edit"].map((t) => `${t}(//${dir.replace(/^\//, "")}/**)`),
     "--disallowedTools", "Task", "Agent", "WebFetch", "WebSearch",
   ];
   const started = Date.now();
   const run = spawnSync(claudeBin(), args, {
     cwd: dir, input: prompt.text, encoding: "utf8", timeout: 15 * 60_000,
-    env: { ...process.env, FLOW_FEEDBACK: "off", PATH: `${stub}:${process.env.PATH}` },
+    // Scrubbed: no parent-session variables, the engineer's feedback store or tokens leak into the run.
+    env: { ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(CLAUDE|FLOW_|GH_|GITHUB_)/.test(k) && !/TOKEN|SECRET|KEY/.test(k))), FLOW_FEEDBACK: "off", FLOW_FEEDBACK_HOME: store, PATH: `${stub}:${process.env.PATH}` },
   });
+  rmSync(plugin, { recursive: true, force: true });
+  rmSync(store, { recursive: true, force: true });
   let result = {};
   try { result = JSON.parse(run.stdout); } catch { result = { is_error: true, result: (run.stderr || run.stdout || "").slice(0, 500) }; }
   const ghCalls = existsSync(ghLog) ? readFileSync(ghLog, "utf8").split("\n").filter(Boolean) : [];
@@ -149,18 +186,23 @@ export function runOnce(testCase, prompt, tree, { model, maxTurns = 25 }) {
 
 export async function runBehavioral(testCase, { baseline, candidate, runs, model, budget, spent = { usd: 0 } }) {
   const score = await scorer(testCase);
-  const arms = {};
-  for (const [arm, tree] of Object.entries({ baseline, candidate })) {
-    arms[arm] = [];
-    for (const prompt of testCase.prompts) {
-      for (let i = 0; i < runs; i++) {
+  const arms = { baseline: [], candidate: [] };
+  // Interleaved (baseline, candidate, baseline, ...) so an outage or rate limit hits both arms alike.
+  for (const prompt of testCase.prompts) {
+    for (let i = 0; i < runs; i++) {
+      for (const [arm, tree] of Object.entries({ baseline, candidate })) {
         if (spent.usd >= budget) { arms[arm].push({ prompt: prompt.id, heldOut: !!prompt.heldOut, skipped: "budget reached" }); continue; }
         const run = runOnce(testCase, prompt, tree, { model, maxTurns: testCase.maxTurns });
         try {
-          const verdict = await score({ dir: run.dir, result: run.result, ghCalls: run.ghCalls });
           const usd = Number(run.result.total_cost_usd ?? 0);
           spent.usd += usd;
-          arms[arm].push({ prompt: prompt.id, heldOut: !!prompt.heldOut, pass: verdict.pass, details: verdict.details, usd, ms: run.ms, turns: run.result.num_turns ?? null, tokens: (run.result.usage?.output_tokens ?? 0) + (run.result.usage?.input_tokens ?? 0) + (run.result.usage?.cache_read_input_tokens ?? 0) + (run.result.usage?.cache_creation_input_tokens ?? 0), error: run.result.is_error ? String(run.result.result ?? "").slice(0, 200) : null });
+          const u = run.result.usage ?? {};
+          const tokens = (u.output_tokens ?? 0) + (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0);
+          // A run that errored or never took a turn says nothing about behavior: excluded, not scored as a failure.
+          if (run.result.is_error || !run.result.num_turns) { arms[arm].push({ prompt: prompt.id, heldOut: !!prompt.heldOut, error: String(run.result.result ?? "no result").slice(0, 200), usd, ms: run.ms }); continue; }
+          const verdict = await score({ dir: run.dir, result: run.result, ghCalls: run.ghCalls });
+          if (verdict.scorerError) { arms[arm].push({ prompt: prompt.id, heldOut: !!prompt.heldOut, error: verdict.details, usd, ms: run.ms }); continue; }
+          arms[arm].push({ prompt: prompt.id, heldOut: !!prompt.heldOut, pass: verdict.pass, details: verdict.details, usd, ms: run.ms, turns: run.result.num_turns, tokens: tokens || null });
         } finally { rmSync(run.dir, { recursive: true, force: true }); rmSync(run.stub, { recursive: true, force: true }); }
       }
     }
@@ -188,15 +230,27 @@ const mean = (rows, key) => { const xs = rows.map((r) => r[key]).filter((x) => t
  * Never "improved" from a candidate's own test alone: the baseline must reproduce the failure, the held-out phrasing
  * must improve beyond noise, nothing else may regress, and the change must stay small and load the real way.
  */
-export function judge({ target, suite = [], calibration = null, growth = [] }) {
+const suiteRegressions = (suite) => suite.flatMap((s) => {
+  if (s.tier === "deterministic") return s.arms.candidate.filter((r, i) => !r.ok && s.arms.baseline[i]?.ok).map((r) => `${s.case}: ${r.name}`);
+  const sb = rate(s.arms.baseline), sc = rate(s.arms.candidate);
+  return sb.n && sc.n && sc.k / sc.n < sb.k / sb.n - 0.15 ? [`${s.case}: ${sc.k}/${sc.n} vs ${sb.k}/${sb.n}`] : [];
+});
+
+export function judge({ target, suite = [], expectedSuite = null, calibration = null, growth = [] }) {
   const reasons = [];
+  // The no-regression check is not optional: every other case of the suite must have been run.
+  if (expectedSuite) {
+    const missing = expectedSuite.filter((id) => !suite.some((s) => s.case === id));
+    if (missing.length) reasons.push(`the suite was not fully run (missing: ${missing.join(", ")})`);
+  }
   if (target.tier === "deterministic") {
     const failsBaseline = target.arms.baseline.some((r) => !r.ok);
     const allCandidate = target.arms.candidate.every((r) => r.ok);
     const heldOut = target.arms.candidate.filter((r) => r.heldOut);
-    if (!allCandidate) reasons.push(`candidate fails ${target.arms.candidate.filter((r) => !r.ok).map((r) => r.name).join(", ")}`);
-    if (heldOut.length === 0) reasons.push("no held-out fixture (bypass attempts written apart from the fix)");
-    const regressions = suite.flatMap((s) => s.arms.candidate.filter((r, i) => !r.ok && s.arms.baseline[i]?.ok).map((r) => `${s.case}: ${r.name}`));
+    if (target.ruleErrors?.candidate?.length) reasons.push(`the candidate's constraint rules are invalid: ${target.ruleErrors.candidate.join("; ")}`);
+    else if (!allCandidate) reasons.push(`candidate fails ${target.arms.candidate.filter((r) => !r.ok).map((r) => r.name).join(", ")}`);
+    if (heldOut.length < 3) reasons.push(`only ${heldOut.length} held-out fixture(s): at least 3, written apart from the fix and not seen by its author`);
+    const regressions = suiteRegressions(suite);
     if (regressions.length) reasons.push(`regresses ${regressions.join(", ")}`);
     if (growth.some((g) => !g.ok)) reasons.push("skill text grows past the size budget");
     if (!failsBaseline && allCandidate) return { verdict: "already-enforced", reasons: ["the baseline already passes every fixture: nothing to fix"] };
@@ -205,6 +259,8 @@ export function judge({ target, suite = [], calibration = null, growth = [] }) {
   if (target.mode !== "plugin-dir") return { verdict: "invalid", reasons: ["results did not load the plugin the real way (plugin-dir)"] };
   if (!calibration?.ok) return { verdict: "invalid-scorer", reasons: ["the scorer does not separate its known-good and known-bad end states"] };
   const b = target.arms.baseline, c = target.arms.candidate;
+  const errors = [...b, ...c].filter((r) => r.error).length, attempted = [...b, ...c].filter((r) => !r.skipped).length;
+  if (attempted && errors / attempted > 0.2) return { verdict: "invalid", reasons: [`${errors}/${attempted} runs errored (outage, rate limit, sandbox): too many to judge`] };
   const base = rate(b);
   if (base.n === 0) return { verdict: "not-run", reasons: ["no completed baseline runs"] };
   if (base.n - base.k < base.n * 0.5) return { verdict: "cannot-reproduce", reasons: [`the baseline passed ${base.k}/${base.n}: the failure does not reproduce, so no improvement can be shown`], unverified: true };
@@ -213,13 +269,11 @@ export function judge({ target, suite = [], calibration = null, growth = [] }) {
   const all = { baseline: base, candidate: rate(c) };
   if (!(hb.n && hc.n)) reasons.push("no held-out phrasing ran");
   else if (!(low > 0)) reasons.push(`held-out: candidate ${hc.k}/${hc.n} vs baseline ${hb.k}/${hb.n}; the 90% interval of the difference is [${low.toFixed(2)}, ${high.toFixed(2)}], which includes 0`);
-  for (const s of suite) {
-    const sb = rate(s.arms.baseline), sc = rate(s.arms.candidate);
-    if (sb.n && sc.n && sc.k / sc.n < sb.k / sb.n - 0.15) reasons.push(`regresses ${s.case}: ${sc.k}/${sc.n} vs ${sb.k}/${sb.n}`);
-  }
+  for (const r of suiteRegressions(suite)) reasons.push(`regresses ${r}`);
   const tb = mean(b, "tokens"), tc = mean(c, "tokens");
   if (tb && tc && tc > tb * 1.15) reasons.push(`tokens per run grow ${Math.round((tc / tb - 1) * 100)}% (limit 15%)`);
   if (growth.some((g) => !g.ok)) reasons.push("skill text grows past the size budget");
+  if (tb == null || tc == null) reasons.push("token usage was not reported, so overhead can't be checked");
   const verdict = reasons.length ? (reasons.some((r) => r.startsWith("regresses")) ? "regressed" : "inconclusive") : "improved";
   return { verdict, tier: "behavioral", reasons, all, heldOut: { baseline: hb, candidate: hc, interval: [low, high] }, tokens: { baseline: tb, candidate: tc }, ms: { baseline: mean(b, "ms"), candidate: mean(c, "ms") }, usd: { baseline: mean(b, "usd"), candidate: mean(c, "usd") } };
 }
@@ -238,6 +292,17 @@ export function baselineTree(candidate, ref) {
   const dir = mkdtempSync(join(tmpdir(), "flow-baseline-"));
   execFileSync("git", ["-C", candidate, "worktree", "add", "-q", "--detach", dir, ref], { stdio: "ignore" });
   return { dir, remove: () => { try { execFileSync("git", ["-C", candidate, "worktree", "remove", "--force", dir], { stdio: "ignore" }); } catch { rmSync(dir, { recursive: true, force: true }); } } };
+}
+
+/** Hash of a checkout's content (tracked and untracked, not ignored), via a temporary index. */
+export function treeHash(dir) {
+  const index = join(mkdtempSync(join(tmpdir(), "flow-index-")), "index");
+  const env = { ...process.env, GIT_INDEX_FILE: index };
+  try {
+    execFileSync("git", ["-C", dir, "read-tree", "HEAD"], { env, stdio: "ignore" });
+    execFileSync("git", ["-C", dir, "add", "-A"], { env, stdio: "ignore" });
+    return execFileSync("git", ["-C", dir, "write-tree"], { env, encoding: "utf8" }).trim();
+  } finally { rmSync(dirname(index), { recursive: true, force: true }); }
 }
 
 export const changedFiles = (candidate, ref) => execFileSync("git", ["-C", candidate, "diff", "--name-only", ref], { encoding: "utf8" }).split("\n").filter(Boolean)

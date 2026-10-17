@@ -1,8 +1,8 @@
 // flow learn, Understand: queue -> incidents -> clusters -> dossiers. Deterministic, local, no model calls.
-import { readFileSync } from "node:fs";
+import { readFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { signalIncidents } from "./classify.mjs";
-import { ack, appendLog, claim, enforceRetention, lock, readJson, readLog, writeJson } from "./store.mjs";
+import { ack, appendLog, claim, enforceRetention, lock, path, readJson, readLog, writeJson } from "./store.mjs";
 
 const plugin = join(dirname(new URL(import.meta.url).pathname), "..");
 
@@ -35,10 +35,10 @@ const SYNTHETIC = {
   "overengineering|overengineering": "Asked for a small change (for example, one endpoint), the agent added abstractions, extra files or dependencies the task did not need.",
   "unauthorized-action|merge": "The engineer said not to merge; later in the session the agent merged (or tried to merge) a pull request anyway.",
   "unauthorized-action|push": "The engineer said not to push, deploy or delete; later the agent did it anyway.",
-  "verification|failing-test-streak": "The agent re-ran a failing test suite three or more times without changing approach.",
+  "verification|failing-test-streak": "The agent re-ran a failing test suite three or more times in a row without changing any code in between.",
   "verification|unverified-claim": "The agent said the work was done or fixed after its last edit without running any test or check.",
-  "tool-inefficiency|repeated-command": "The agent ran the same command four or more times in one session.",
-  "tool-inefficiency|rewrites": "The agent rewrote the same file ten or more times in one session.",
+  "tool-inefficiency|repeated-command": "The agent ran the same non-routine command five or more times in one session.",
+  "tool-inefficiency|rewrites": "The agent rewrote the same file twenty or more times in one session.",
 };
 const synthetic = (category, key) => SYNTHETIC[`${category}|${key}`] ?? `The engineer corrected the agent for a ${category} failure${key ? ` (${key})` : ""}. Investigate the dossier counts and signals; no engineer text is included here.`;
 
@@ -46,11 +46,17 @@ function constraintRuleIds() {
   try { return JSON.parse(readFileSync(join(plugin, "hooks/constraint-rules.json"), "utf8")).rules ?? []; } catch { return []; }
 }
 
+// Events are untrusted local data (an agent could write some): only known categories and plain keys reach ids,
+// file names and PR titles.
+const safeCategory = (c) => (TARGETS[c] ? c : "unclassified");
+const safeKeys = (keys) => (Array.isArray(keys) ? keys : []).map((k) => String(k).toLowerCase().replace(/[^a-z0-9-]/g, "")).filter(Boolean).slice(0, 4);
+
 /** Turn one queue event into incidents (and side records). Pure apart from the side logs. */
 export function incidentsFrom(event) {
   if (event.type === "prompt") {
     if (event.kind === "correction") {
-      return [{ id: event.id, at: event.at, session: event.session, repo: event.repo, model: event.model, version: event.version, source: "correction", category: event.category, keys: event.keys ?? [], defect: TARGETS[event.category]?.mechanism !== "personal", text: event.text, objective: event.objective }];
+      const category = safeCategory(event.category);
+      return [{ id: event.id, at: event.at, session: event.session, repo: event.repo, model: event.model, version: event.version, source: "correction", category, keys: safeKeys(event.keys), defect: TARGETS[category].mechanism !== "personal", text: event.text, objective: event.objective }];
     }
     if (event.kind === "preference") appendLog("preferences.jsonl", { at: event.at, session: event.session, text: event.text });
     if (event.kind === "positive") appendLog("positives.jsonl", { at: event.at, session: event.session, repo: event.repo });
@@ -93,7 +99,8 @@ export function buildClusters(incidents, { ledger = [], rules = constraintRuleId
       models: [...new Set(list.map((i) => i.model).filter(Boolean))],
       firstAt: list[0].at, lastAt: list.at(-1).at,
       defect: list.some((i) => i.defect), objective: signal,
-      actionable: list.some((i) => i.defect) && (sessions >= 2 || signal || severe),
+      // One session is anecdote; an objective signal still needs a second session. An unauthorized action is severe enough at once.
+      actionable: list.some((i) => i.defect) && (sessions >= 2 || severe),
       coverage: target.mechanism === "deterministic" ? (covered ? "a constraint rule covers this action" : "no constraint rule covers this action") : target.file ? `instruction in ${target.file}${target.section ? ` (${target.section})` : ""}` : "no target yet",
       recurrence: change ? { since: change.at, pr: change.pr, after, note: "observational: also moved by model and usage changes" } : null,
       synthetic: synthetic(category, key),
@@ -110,18 +117,20 @@ export function processQueue() {
   try {
     const seen = new Set(readJson("processed.json", []));
     let events = 0, added = 0;
-    for (const item of claim()) {
+    const items = claim();
+    for (const item of items) {
       events++;
-      if (!seen.has(item.event.id)) {
-        for (const incident of incidentsFrom(item.event)) { appendLog("incidents.jsonl", incident); added++; }
-        seen.add(item.event.id);
-        writeJson("processed.json", [...seen].slice(-20_000));
-      }
-      ack(item);
+      if (seen.has(item.event.id)) continue;
+      for (const incident of incidentsFrom(item.event)) { appendLog("incidents.jsonl", incident); added++; }
+      seen.add(item.event.id);
     }
+    // Recorded before acking: a crash between the two re-processes events, and incident ids make that harmless.
+    writeJson("processed.json", [...seen].slice(-20_000));
+    for (const item of items) ack(item);
     enforceRetention();
     const clusters = buildClusters(readLog("incidents.jsonl"), { ledger: readLog("ledger.jsonl") });
     writeJson("clusters.json", clusters);
+    rmSync(path("dossiers"), { recursive: true, force: true }); // a cluster that aged out takes its local examples with it
     for (const cluster of clusters) writeJson(`dossiers/${cluster.id}.json`, cluster);
     return { events, incidents: added, clusters: clusters.length, actionable: clusters.filter((c) => c.actionable).length };
   } finally { release(); }

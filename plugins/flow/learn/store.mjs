@@ -23,7 +23,8 @@ const SECRET = [
   /\bAIza[0-9A-Za-z_-]{35}\b/,
   /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/,
   /\b[a-z][a-z0-9+.-]*:\/\/[^\s:/@]+:[^\s@/]+@/i,
-  /\b(password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|client[_-]?secret|private[_-]?key)\b\s*[:=]/i,
+  /\b(password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|client[_-]?secret|private[_-]?key)\b\s*([:=]|\bis\b)\s*\S/i,
+  /\b[a-f0-9]{32,}\b/i, // hex keys (also drops commit shas: not needed)
   /\b[A-Z][A-Z0-9_]{2,}_(KEY|TOKEN|SECRET|PASSWORD)\s*=/,
   /\bBearer\s+[A-Za-z0-9._~+/-]{12,}/,
   /"type"\s*:\s*"service_account"/,
@@ -73,11 +74,11 @@ export function saveConfig(value) { ensure(home()); writeFileSync(path("config.j
  * May this prompt's session be captured? Off with FLOW_FEEDBACK=off or `flow-learn disable`. A repo whose flow config
  * says learn.capture = "opt-in" (team installs) captures only after the engineer ran `flow-learn enable` (enabledAt set).
  */
-export function captureAllowed(repoConfig) {
+export function captureAllowed(repoConfig, repoName = null) {
   if (process.env.FLOW_FEEDBACK === "off") return false;
   const c = config();
   if (c.capture === false) return false;
-  if (repoConfig?.learn?.capture === "opt-in" && !c.enabledAt) return false;
+  if (repoConfig?.learn?.capture === "opt-in" && !(c.enabledRepos ?? []).includes(repoName)) return false;
   return true;
 }
 
@@ -136,15 +137,17 @@ export function readJson(name, fallback) { try { return JSON.parse(readFileSync(
 export function writeJson(name, value) { ensure(home()); const tmp = path(`.${name.replace(/\//g, "_")}.tmp`); writeFileSync(tmp, JSON.stringify(value, null, 2), { mode: 0o600 }); ensure(join(path(name), "..")); renameSync(tmp, path(name)); }
 
 /** Drop records older than the retention window from a log; delete old session files. */
+export const LOGS = ["incidents.jsonl", "sessions.jsonl", "hook-latency.jsonl", "preferences.jsonl", "positives.jsonl", "constraints.jsonl", "requirement-changes.jsonl", "evals.jsonl"];
 export function enforceRetention(now = Date.now()) {
   const cutoff = now - RETENTION_DAYS * 86_400_000;
-  for (const name of ["incidents.jsonl", "sessions.jsonl", "hook-latency.jsonl"]) {
-    const kept = readLog(name).filter((r) => !r.at || Date.parse(r.at) >= cutoff);
-    if (existsSync(path(name))) writeLog(name, kept);
+  for (const name of LOGS) {
+    if (!existsSync(path(name))) continue;
+    writeLog(name, readLog(name).filter((r) => !r.at || Date.parse(r.at) >= cutoff));
   }
-  if (existsSync(path("sessions"))) {
-    for (const name of readdirSync(path("sessions"))) {
-      try { if (statSync(path("sessions", name)).mtimeMs < cutoff) rmSync(path("sessions", name), { force: true }); } catch { /* gone */ }
+  for (const dir of ["sessions", "queue/dead", "proposals"]) {
+    if (!existsSync(path(dir))) continue;
+    for (const name of readdirSync(path(dir))) {
+      try { if (statSync(path(dir, name)).mtimeMs < cutoff) rmSync(path(dir, name), { force: true }); } catch { /* gone */ }
     }
   }
 }

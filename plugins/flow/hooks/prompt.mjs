@@ -4,11 +4,11 @@
 // 3. feedback capture (flow 2.1): a correction, praise or preference becomes a small redacted event in the local queue.
 // Fails open: any error lets the prompt through untouched.
 import { closeSync, existsSync, openSync, readSync, statSync } from "node:fs";
-import { classifyPrompt, constraintChanges, isAutomated } from "../learn/classify.mjs";
+import { performance } from "node:perf_hooks";
+import { classifyPrompt, constraintChanges, isAutomated, spendGrant } from "../learn/classify.mjs";
 import { appendLog, captureAllowed, clean, enqueue, loadSession, safe, saveSession } from "../learn/store.mjs";
 import { PLUGIN_VERSION, constraintRules, describeConstraints, repoFlowConfig, repoOf, typedByEngineer } from "./capture.mjs";
 
-const started = Date.now();
 const TTL_MIN = Number(process.env.FLOW_CACHE_TTL_MIN) || 60;
 const BIG = 150_000, HUGE = 500_000;
 
@@ -59,8 +59,13 @@ try {
         if (start.length) context.push(`[flow] Constraint noted for this session: ${describeConstraints(start, rules).join("; ")}. Hooks refuse it until the engineer lifts it.`);
         if (release.length) context.push(`[flow] Constraint lifted by the engineer: ${describeConstraints(release, rules).join("; ")}.`);
       }
+      const grant = spendGrant(input.prompt);
+      if (grant != null) {
+        session.spendApprovedUsd = grant;
+        context.push(`[flow] The engineer approved up to $${grant} of eval spend this session.`);
+      }
       const { root, name } = repoOf(input.cwd || process.cwd());
-      if (captureAllowed(repoFlowConfig(root))) {
+      if (captureAllowed(repoFlowConfig(root), name)) {
         session.prompts = (session.prompts ?? 0) + 1;
         session.objective ??= clean(input.prompt, 200);
         const verdict = classifyPrompt(input.prompt);
@@ -74,7 +79,8 @@ try {
           });
           if (verdict.kind === "correction") (session.corrections ??= []).push({ category: verdict.category, at: Date.now() });
         }
-        appendLog("hook-latency.jsonl", { at: new Date().toISOString(), hook: "prompt", ms: Date.now() - started });
+        // Time since the process started, module loading included (Node's own startup before that is not visible here).
+        appendLog("hook-latency.jsonl", { at: new Date().toISOString(), hook: "prompt", ms: Math.round(performance.now()) });
       }
       saveSession(input.session_id, session);
     });

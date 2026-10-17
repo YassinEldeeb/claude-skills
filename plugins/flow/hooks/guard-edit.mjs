@@ -18,7 +18,7 @@ try {
   const target = tool.file_path ?? tool.notebook_path;
   const cwd = input.cwd || process.env.CLAUDE_PROJECT_DIR || process.cwd();
   if (!target) process.exit(0);
-  if (real(isAbsolute(target) ? target : join(cwd, target)).startsWith(real(home()))) block("flow's local feedback store is the engineer's record; it is never edited by hand or by an agent.");
+  if (real(isAbsolute(target) ? target : join(cwd, target)).toLowerCase().startsWith(real(home()).toLowerCase())) block("flow's local feedback store is the engineer's record; it is never edited by hand or by an agent.");
   const root = repoRoot(cwd);
   const flow = loadFlow(root);
   if (!flow) process.exit(0);

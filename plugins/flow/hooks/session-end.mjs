@@ -29,7 +29,7 @@ try {
   const input = JSON.parse(text);
   if (process.env.FLOW_FEEDBACK === "off" || process.env.CLAUDE_CODE_SESSION_ATTENDED === "0") process.exit(0);
   const { root, name } = repoOf(input.cwd || process.cwd());
-  if (!captureAllowed(repoFlowConfig(root))) process.exit(0);
+  if (!captureAllowed(repoFlowConfig(root), name)) process.exit(0);
   const records = await readTranscript(input.transcript_path).catch(() => null);
   const session = loadSession(input.session_id);
   const event = {

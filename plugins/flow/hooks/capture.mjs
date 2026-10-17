@@ -13,8 +13,14 @@ export const PLUGIN_VERSION = FLOW_VERSION;
  * absent (it is in -p mode), so then only an attended session counts: headless children set CLAUDE_CODE_SESSION_ATTENDED=0.
  * /loop and schedule wakeups, SDK relays and eval runs never count.
  */
-export const typedByEngineer = (input, env = process.env) =>
-  env.FLOW_FEEDBACK !== "off" && (input.source === "user" || (input.source == null && env.CLAUDE_CODE_SESSION_ATTENDED !== "0"));
+export const typedByEngineer = (input, env = process.env) => {
+  if (env.FLOW_FEEDBACK === "off") return false;
+  if (input.source === "user") return true;
+  // The VS Code and Desktop apps drive Claude Code non-interactively, so their prompts come as source "sdk" (seen in the
+  // 2.1.301 binary) while the session is attended: those are still typed by the engineer.
+  if (input.source === "sdk") return env.CLAUDE_CODE_SESSION_ATTENDED === "1" && ["claude-vscode", "claude-desktop"].includes(env.CLAUDE_CODE_ENTRYPOINT);
+  return input.source == null && env.CLAUDE_CODE_SESSION_ATTENDED !== "0";
+};
 
 /** The constraint rules shipped with the plugin (FLOW_CONSTRAINT_RULES overrides the path, for evals of a candidate tree). */
 export function constraintRules() {

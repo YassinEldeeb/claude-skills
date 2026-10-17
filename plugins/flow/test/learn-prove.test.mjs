@@ -91,7 +91,8 @@ describe("deterministic tier: real hook scripts, baseline vs candidate", () => {
       const j = judge({ target: result });
       assert.ok(result.arms.baseline.some((r) => !r.ok), "the baseline reproduces the failure");
       // This simplified rule is a test fixture; the demo's real rule is proven separately. Here: the harness reports misses.
-      if (failing.length) assert.equal(j.verdict, "rejected"); else assert.equal(j.verdict, "enforced");
+      assert.equal(j.verdict, "rejected", "seen fixtures can't prove enforcement: held-out ones are required");
+      assert.match(j.reasons.join(" "), /held-out/);
     } finally { rmSync(t.root, { recursive: true, force: true }); }
   });
   test("a rule that blocks too broadly breaks the allowed fixtures and is rejected", () => {
@@ -167,17 +168,24 @@ process.stdout.write(JSON.stringify({ result: "done", total_cost_usd: 0, num_tur
   });
 });
 
-describe("every regression case is well formed; enforced deterministic cases pass on this tree", () => {
+describe("every regression case is well formed; every enforced case passes on this tree", () => {
+  const enforced = JSON.parse(readFileSync(join(plugin, "learn/enforced.json"), "utf8"));
+  test("the shipped constraint rules are valid (one bad regex must never ship)", async () => {
+    const { validateRules } = await import("../learn/classify.mjs");
+    assert.deepEqual(validateRules(JSON.parse(readFileSync(join(plugin, "hooks/constraint-rules.json"), "utf8")).rules), []);
+  });
+  for (const id of enforced) {
+    test(`enforced: ${id} passes every fixture on this tree`, () => {
+      const result = runDeterministic(loadCase(id), { baseline: repoRoot, candidate: repoRoot });
+      assert.deepEqual(result.arms.candidate.filter((r) => !r.ok).map((r) => r.name), []);
+    });
+  }
   for (const c of listCases()) {
     test(c.id, async () => {
       assert.ok(c.cluster && c.kind && c.author, "cluster, kind and author are required");
       if (c.kind === "deterministic") {
-        assert.ok(c.fixtures.some((f) => f.heldOut), "held-out fixtures");
         assert.ok(c.fixtures.some((f) => f.expect === "allow"), "allowed fixtures (no over-blocking)");
-        if (c.enforced) {
-          const result = runDeterministic(c, { baseline: repoRoot, candidate: repoRoot });
-          assert.deepEqual(result.arms.candidate.filter((r) => !r.ok).map((r) => r.name), []);
-        }
+        assert.ok(c.fixtures.some((f) => f.expect === "block"), "blocked fixtures");
       } else {
         assert.ok(c.prompts.some((p) => p.heldOut) && c.prompts.some((p) => !p.text.startsWith("/")), "a held-out phrasing and one without a slash command");
         assert.equal((await calibrate(c)).ok, true, "the scorer separates known-good from known-bad");
@@ -203,38 +211,47 @@ describe("propose: allowed paths, the gh allowlist, the PR body, a real git remo
     assert.ok(!body.includes("@acme") && !body.includes("](https://"));
     assert.match(body, /Human review required/);
   });
-  test("end to end against a local bare remote with a gh stub: branch pushed, one draft PR, labels, rate limits, no merge", () => {
+  test("end to end against a local bare remote with a gh stub: re-verified evidence, one draft PR, rate limits, no merge", () => {
     const root = mkdtempSync(join(tmpdir(), "flow-propose-"));
     const remote = join(root, "remote.git"), work = join(root, "work"), bin = join(root, "bin"), calls = join(root, "gh.log");
+    const savedPath = process.env.PATH, savedHome = process.env.FLOW_FEEDBACK_HOME;
     try {
       git(root, "init", "-q", "--bare", remote);
       git(root, "clone", "-q", remote, work);
-      mkdirSync(join(work, "plugins/flow/hooks"), { recursive: true });
-      writeFileSync(join(work, "plugins/flow/hooks/constraint-rules.json"), JSON.stringify({ rules: [] }));
+      mkdirSync(join(work, "plugins"), { recursive: true });
+      cpSync(plugin, join(work, "plugins/flow"), { recursive: true, filter: (p) => !p.includes("/test/") });
       git(work, "add", "-A"); git(work, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "base"); git(work, "push", "-q", "origin", "HEAD:master");
+      // The candidate: a rule plus a NEW case (with held-out fixtures) for this cluster.
       writeFileSync(join(work, "plugins/flow/hooks/constraint-rules.json"), JSON.stringify({ rules: [NO_MERGE] }));
+      const caseDir = join(work, "plugins/flow/learn/cases/no-merge-new");
+      mkdirSync(caseDir, { recursive: true });
+      writeFileSync(join(caseDir, "case.json"), JSON.stringify({ id: "no-merge-new", kind: "deterministic", cluster: cluster.id, author: "test", hook: "guard-bash", fixtures: [
+        { name: "merge", constraints: ["no-merge"], command: "gh pr merge 1", expect: "block", heldOut: true },
+        { name: "graphql", constraints: ["no-merge"], command: "gh api graphql -f query='mutation { mergePullRequest(input:{}) { x } }'", expect: "block", heldOut: true },
+        { name: "rest put", constraints: ["no-merge"], command: "gh api -X PUT repos/o/r/pulls/2/merge", expect: "block", heldOut: true },
+        { name: "local merge", constraints: ["no-merge"], command: "git merge main", expect: "allow", heldOut: true },
+        { name: "no constraint", constraints: [], command: "gh pr merge 1", expect: "allow" },
+      ] }));
       mkdirSync(bin);
       const stub = (open) => writeFileSync(join(bin, "gh"), `#!/bin/sh\necho "$@" >> ${JSON.stringify(calls)}\ncase "$1 $2" in\n"pr list") echo "[]";;\n"api -X") echo '{"total_count":${open}}';;\n"pr create") echo "https://github.com/acme/skills/pull/42";;\nesac\n`);
       stub(0); chmodSync(join(bin, "gh"), 0o755);
-      const env = process.env.PATH;
-      process.env.PATH = `${bin}:${env}`;
+      process.env.PATH = `${bin}:${savedPath}`;
       process.env.FLOW_FEEDBACK_HOME = join(root, "home");
-      try {
-        assert.throws(() => propose({ dir: work, repo: "acme/skills", base: "origin/master", cluster, rootCause: "r", change: "c", results: { target }, judgement: { verdict: "inconclusive", reasons: ["x"] }, cases: [] }), /not proposing/);
-        const out = propose({ dir: work, repo: "acme/skills", base: "origin/master", cluster, rootCause: "no rule covered merges", change: "add the no-merge constraint rule", results: { target }, judgement: { verdict: "enforced", tier: "deterministic", reasons: [] }, cases: [{ id: "no-merge-constraint", kind: "deterministic", author: "independent" }] });
-        assert.equal(out.url, "https://github.com/acme/skills/pull/42");
-        assert.match(git(remote, "branch", "--list"), /flow-learn\/unauthorized-action--merge/);
-        const log = readFileSync(calls, "utf8");
-        assert.match(log, /pr create .*--draft/);
-        assert.match(log, /--label flow-learn --label enforcement/);
-        assert.ok(!/pr merge|review|ready/.test(log), "never merges, approves or marks ready");
-        stub(5);
-        writeFileSync(join(work, "plugins/flow/hooks/constraint-rules.json"), JSON.stringify({ rules: [NO_MERGE, { ...NO_MERGE, id: "no-push" }] }));
-        assert.throws(() => propose({ dir: work, repo: "acme/skills", base: "origin/master", cluster: { ...cluster, id: "unauthorized-action--push" }, rootCause: "r", change: "c", results: { target }, judgement: { verdict: "enforced", tier: "deterministic", reasons: [] }, cases: [] }), /rate limit/);
-        writeFileSync(join(work, "plugins/flow/gate-lib.mjs"), "x");
-        git(work, "add", "-A");
-        assert.throws(() => propose({ dir: work, repo: "acme/skills", base: "origin/master", cluster, rootCause: "r", change: "c", results: { target }, judgement: { verdict: "enforced", tier: "deterministic", reasons: [] }, cases: [] }), /may not change/);
-      } finally { process.env.PATH = env; }
-    } finally { rmSync(root, { recursive: true, force: true }); }
+      const run = (results, c = cluster) => propose({ dir: work, repo: "acme/skills", base: "origin/master", cluster: c, rootCause: "no rule covered merges", change: "add the no-merge constraint rule", results });
+      // A hand-written "enforced" for a case it names does not count: propose re-runs the deterministic tier.
+      const out = run({ cases: [{ case: "no-merge-new", judgement: { verdict: "enforced" } }] });
+      assert.equal(out.url, "https://github.com/acme/skills/pull/42");
+      assert.match(git(remote, "branch", "--list"), /flow-learn\/unauthorized-action--merge/);
+      assert.equal(git(work, "rev-parse", "--abbrev-ref", "HEAD").trim(), "master", "the engineer's checkout was not switched");
+      const log = readFileSync(calls, "utf8");
+      assert.match(log, /pr create .*--draft/);
+      assert.match(log, /--label flow-learn --label enforcement/);
+      assert.ok(!/pr merge|review|ready/.test(log), "never merges, approves or marks ready");
+      // A case from another cluster, or a broken rule, is caught by the re-run, whatever the file says.
+      assert.throws(() => run({ cases: [{ case: "no-merge-new", judgement: { verdict: "enforced" } }] }, { ...cluster, id: "unauthorized-action--push" }), /belongs to cluster/);
+      stub(5);
+      writeFileSync(join(caseDir, "extra.txt"), "x");
+      assert.throws(() => run({ cases: [{ case: "no-merge-new" }] }, { ...cluster, id: "unauthorized-action--merge" }), /rate limit|belongs/);
+    } finally { process.env.PATH = savedPath; process.env.FLOW_FEEDBACK_HOME = savedHome; rmSync(root, { recursive: true, force: true }); }
   });
 });
