@@ -135,6 +135,7 @@ Explicit corrections like the examples above are caught; implicit ones ("no, use
 - Session constraints ("don't merge") are enforced by the Bash guard on a best-effort basis; GitHub's required checks remain the hard layer.
 - **No constraint rules ship yet.** The engine is there, but rules arrive only as proven improvements. The demo's no-merge rule handled every command in five cases, then missed one phrasing in its fourth unseen round, so the gate rejected it ([results](docs/demo/flow-2.1/RESULTS.md)).
 - Behavioral evals need spend approval, recorded from your own prompt ("approve spend up to $20"); the hooks refuse `--approve-spend` without it.
+- The demo's two instruction changes (outcome drift, overengineering) were evaluated on Opus through real plugin loading: the current flow already passed every run (9/9 each), so the gate returned `cannot-reproduce` and neither change was promoted. No regressions ([behavioral results](docs/demo/flow-2.1/BEHAVIORAL.md)).
 
 ```bash
 node plugins/flow/learn/cli.mjs report            # from a checkout; an installed plugin's CLI is in ~/.claude/plugins/cache/…/flow/<version>/learn/cli.mjs
