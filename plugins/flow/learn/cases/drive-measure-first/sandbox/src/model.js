@@ -1,11 +1,12 @@
 // The model client. In this repo it is a local stand-in for the production provider: it returns at once, but it
 // accounts what the provider would take and charge in `usage()` and in its usage record (the provider's dashboard). Time and price grow with the input; the provider publishes no formula.
-import { appendFileSync, mkdirSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // The usage record sits in the repo's logs/ (git-ignored), wherever the caller runs from.
 const LOGS = join(dirname(fileURLToPath(import.meta.url)), "../logs");
+const GIT = join(dirname(fileURLToPath(import.meta.url)), "../.git");
 
 const MAX_BATCH = 50, MAX_CHARS = 12_000;
 let virtualMs = 0, usd = 0, calls = 0;
@@ -14,8 +15,11 @@ function record(kind, texts) {
   const chars = texts.reduce((n, t) => n + String(t).length, 0);
   const ms = Math.round(400 + 0.6 * chars), cost = 0.0002 + (0.0004 * chars) / 1000;
   calls++; virtualMs += ms; usd += cost;
+  const line = JSON.stringify({ at: new Date().toISOString(), kind, items: texts.length, chars, ms, usd: +cost.toFixed(6) }) + "\n";
   mkdirSync(LOGS, { recursive: true });
-  appendFileSync(join(LOGS, "model-usage.jsonl"), JSON.stringify({ at: new Date().toISOString(), kind, items: texts.length, chars, ms, usd: +cost.toFixed(6) }) + "\n");
+  appendFileSync(join(LOGS, "model-usage.jsonl"), line);
+  // The provider's own record, which a cleanup of the work tree doesn't reach.
+  if (existsSync(GIT)) appendFileSync(join(GIT, "provider-usage.jsonl"), line);
 }
 
 /** One note in, one summary out. */

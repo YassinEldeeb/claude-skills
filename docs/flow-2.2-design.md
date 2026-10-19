@@ -2,7 +2,7 @@
 
 ## What prompted it
 
-A background pipeline project ran for about eleven days under flow 2.0/2.1 with several agents in parallel. Every individual piece had a spec, tests and reviews. The project still took days longer than it needed, for reasons the workflow didn't catch:
+A background pipeline project ran for about eleven days with several agents in parallel. Every individual piece had a spec, tests and reviews. The project still took days longer than it needed, for reasons the workflow didn't catch:
 
 - **The deciding number came last.** Nobody ran the planned processing shape on a real person's data until late. When someone finally did, the forecast for a heavy user was days, against a target of hours. Every earlier review had checked the pieces, not the whole run.
 - **Patches instead of design questions.** The same kind of failure (a free-text safety rule) was patched pass after pass. Each fix was defensible, and each one made the next failure.
@@ -21,14 +21,19 @@ A background pipeline project ran for about eleven days under flow 2.0/2.1 with 
 ## What did not change
 
 - **The gate and the task schema.** `.flow/tasks/<ID>/progress.md` is a plain file the gate doesn't read, so repos on the 2.0 gate need no upgrade. The scorecard lives there, not in `task.json`: the 2.0 gate rejects unknown task fields.
-- **No continuation hook.** I considered a Stop hook that sends the agent back to the next step. A baseline run showed current flow already carries a medium task from one prompt to verified, stopping only at a real blocker (no remote). The evidence didn't justify a mechanism that could keep a wrong loop running.
+- **No continuation hook.** I considered a Stop hook that sends the agent back to the next step. A baseline run showed current flow already carries a medium task from one prompt to verified, stopping only at a real blocker (no remote). The evidence didn't justify a mechanism that could keep a wrong loop running. Continuation stays an instruction, with its exits written down: the engineer says stop or asks something else, a checkpoint, a named wait, or done.
 
-## Evidence
+## Evidence (2026-10-19, Sonnet, real plugin loading)
 
-Three behavioral cases under `plugins/flow/learn/cases/drive-*`, run with real plugin loading (`flow-learn prove`, `claude -p --plugin-dir`, Sonnet), baseline `origin/master` against this branch. Results: see the PR description.
+Three behavioral cases under `plugins/flow/learn/cases/drive-*`, run with `flow-learn prove` (`claude -p --plugin-dir`), baseline `origin/master` against this branch, one run per prompt per arm, three rounds. The existing suite (`outcome-drift-paying-customers`, `overengineering-health-endpoint`, the no-merge cases) is run alongside each round.
 
-| Case | What a pass needs |
-|---|---|
-| `drive-medium-forecast` | One `/flow:start` on a medium feature ends verified (task, evidence, `verify.md`, working cached client) without handing back a step the agent could run |
-| `drive-measure-first` | A performance-sensitive high-risk job: before the spec approval, the planned processing runs on the real sample and the forecast comes from that measurement (the stand-in model client's cost depends on input size and publishes no formula) |
-| `drive-two-misses` | A task two rounds off-track: continuing it changes the approach and meets the target, or raises a decision, instead of another tweak |
+| Case | What a pass needs | Result |
+|---|---|---|
+| `drive-measure-first` | A performance-sensitive high-risk job (a nightly model pass over every user's notes, 1-hour target). Before the spec approval, the planned processing runs on the real sample and the forecast comes from it. The stand-in client's cost depends on input size and publishes no formula. | **Ran the planned shape on the sample before deciding: this branch 5 of 8 runs, master 1 of 9** (counted from the transcripts). Master read the client's code and estimated, and twice labelled such a number "measured". Both arms usually saw that the plan misses the hour. The scorer missed real runs twice, when the agent tidied its spike output, so the gated verdict stayed inconclusive. The case now also records usage under `.git/`. |
+| `drive-medium-forecast` | One prompt on a medium feature ends verified (task, evidence, `verify.md`, a working cached client) without handing back a step the agent could run | **No improvement shown.** Master already does this most of the time (5 of 8). This branch passed 3 of 6 after the fix below. In the failures, one run misread the README and sized the task small, and two plain-language prompts stopped before `verify.md`. |
+| `drive-two-misses` | A task two rounds off-track: continuing changes the approach and meets the target, or raises a decision | **Cannot reproduce:** master passed every run (it switched to batch inserts), so no improvement can be shown. |
+| Existing suite | No regressions | Same on both arms in every round (behavioral 3/3 each; deterministic cases identical). |
+
+What the rounds changed. Round 1 showed this branch folding build and verify into one step on a medium task, with no evidence and no `verify.md`. The route table now names `/flow:build`, `/flow:verify` and `/flow:ship` as skills to load and finish, and says what "done" means for medium work. A fresh-eyes review then found that medium tasks skipped the light challenge the gate requires, that the forecast was labelled "measured", two `ownWords` bypasses, and scorers that passed bad behavior. All of these are fixed and tested.
+
+Limits. The samples are small (8 to 9 runs per arm on the deciding case) and come from one model on synthetic repos. The medium regression signal is within noise but not reassuring; watch it. About $10 of model spend across the rounds.

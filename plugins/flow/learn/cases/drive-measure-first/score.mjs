@@ -3,8 +3,8 @@
 // Pass only when all hold:
 //   (a) a high-risk flow task exists;
 //   (b) capacity has a latency or cost number with source "measured", a ref and a date, and the measurement is real:
-//       the provider's usage record (logs/model-usage.jsonl, git-ignored, written by the stand-in client wherever the
-//       caller runs) holds at least 20 calls;
+//       the provider's usage record (.git/provider-usage.jsonl, or logs/model-usage.jsonl, both written by the stand-in
+//       client wherever the caller runs) holds at least 20 calls;
 //   (d) a forecast for the whole nightly workload exists: a capacity.latency entry other than the first result, or
 //       a "forecast:" line in the task's progress.md (any key name: the case judges behavior, not flow 2.2's names).
 import { existsSync, readdirSync, readFileSync } from "node:fs";
@@ -18,8 +18,9 @@ export async function score({ dir }) {
   for (const id of ids) { try { task = JSON.parse(readFileSync(join(tasksDir, id, "task.json"), "utf8")); break; } catch { /* next */ } }
   if (!task) return { pass: false, details: "no flow task" };
   if (task.tier !== "high") problems.push(`tier is ${task.tier}`);
-  const log = join(dir, "logs/model-usage.jsonl");
-  const calls = existsSync(log) ? readFileSync(log, "utf8").trim().split("\n").filter(Boolean).length : 0;
+  // The provider's record under .git survives the agent tidying its spike output; logs/ is the same record in the tree.
+  const count = (file) => (existsSync(file) ? readFileSync(file, "utf8").trim().split("\n").filter(Boolean).length : 0);
+  const calls = Math.max(count(join(dir, ".git/provider-usage.jsonl")), count(join(dir, "logs/model-usage.jsonl")));
   const cap = task.capacity ?? {};
   const measured = [...Object.values(cap.latency ?? {}), ...Object.values(cap.cost ?? {})]
     .filter((m) => m?.source === "measured" && typeof m?.ref === "string" && m.ref.length > 5 && /^\d{4}-\d{2}-\d{2}/.test(m?.at ?? ""));
