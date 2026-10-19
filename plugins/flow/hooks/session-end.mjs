@@ -6,7 +6,7 @@ import { createReadStream, existsSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import { transcriptSignals } from "../learn/classify.mjs";
-import { appendLog, captureAllowed, enqueue, loadSession, safe } from "../learn/store.mjs";
+import { appendLog, captureAllowed, config, enqueue, loadSession, safe } from "../learn/store.mjs";
 import { PLUGIN_VERSION, repoFlowConfig, repoOf } from "./capture.mjs";
 
 const here = dirname(new URL(import.meta.url).pathname);
@@ -43,6 +43,8 @@ try {
   // The worker is deterministic and local (no model calls); it never runs evals.
   const child = spawn(process.execPath, [join(here, "../learn/cli.mjs"), "process", "--quiet"], { detached: true, stdio: "ignore", env: { ...process.env, FLOW_FEEDBACK: "off" } });
   child.unref();
+  // Auto-learn (opt-in): the session is over, so its idle wait ends at once. A no-op when it's off.
+  if (safe(() => config().autoLearn?.enabled, false)) await import("../learn/auto.mjs").then((m) => m.startDetached({ session: input.session_id, transcript: input.transcript_path, ended: true })).catch(() => {});
   process.exit(0);
 } catch {
   process.exit(0);

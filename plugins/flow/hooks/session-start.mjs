@@ -6,6 +6,8 @@ import { captureAllowed, config, loadSession, safe, saveConfig, saveSession } fr
 import { activeConstraints, constraintRules, describeConstraints, repoFlowConfig, typedByEngineer } from "./capture.mjs";
 import { branchTasks, currentBranch, loadFlow, readInput, repoRoot } from "./common.mjs";
 
+let newsSince = () => null;
+try { if (config().autoLearn) ({ newsSince } = await import("../learn/auto.mjs")); } catch { /* fail open */ }
 try {
   const input = await readInput().catch(() => ({}));
   const root = repoRoot(input.cwd || process.env.CLAUDE_PROJECT_DIR || process.cwd());
@@ -23,9 +25,12 @@ try {
     if (captureAllowed(repoFlowConfig(root), root ? root.split("/").pop() : null) && !config().noticeShown) {
       // Shown to the engineer (systemMessage), not left for the model to relay; remembered in config.json.
       const cli = join(dirname(new URL(import.meta.url).pathname), "../learn/cli.mjs");
-      notice = `[flow] flow records your corrections and session signals locally to improve its skills (redacted; nothing leaves this machine). To turn it off, run in your terminal: node "${cli}" disable (or set FLOW_FEEDBACK=off).`;
+      notice = `[flow] flow records your corrections and session signals locally to improve its skills (redacted; nothing leaves this machine). To turn it off, run in your terminal: node "${cli}" disable (or set FLOW_FEEDBACK=off). Optional: type "flow auto-learn on" and, after a correction, flow tests a fix to its workflow in the background on your Claude plan and opens a draft PR (synthetic text only) when the fix is proven.`;
       saveConfig({ ...config(), noticeShown: new Date().toISOString() });
     }
+    // What auto-learn did in the background, once per news item.
+    const news = config().autoLearn ? newsSince(config().autoLearnShownAt ?? null) : null;
+    if (news) { notice = notice ? `${notice}\n${news}` : news; saveConfig({ ...config(), autoLearnShownAt: new Date().toISOString() }); }
     saveSession(input.session_id, session);
     return lines;
   }, []);

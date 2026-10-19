@@ -1,11 +1,11 @@
 ---
 name: learn
-description: Turn a recurring correction into a proven improvement to flow's skills or constraint rules - root cause, independently written regression cases, the smallest fix, baseline-vs-candidate proof, then a draft PR. Use for /flow:learn [cluster], or when the engineer asks to learn from a correction. Never runs on its own.
+description: Turn a recurring correction into a proven improvement to flow's skills or constraint rules - root cause, independently written regression cases, the smallest fix, baseline-vs-candidate proof, then a draft PR. Use for /flow:learn [cluster], or when the engineer asks to learn from a correction. With auto-learn on ("flow auto-learn on"), learn/auto.mjs runs these steps in the background after a correction.
 ---
 
 # Learn
 
-flow records corrections and session signals locally, and groups them into clusters. This workflow takes one cluster and turns it into a change that **measurably** makes the failure less likely, or says honestly that it can't.
+flow records corrections and session signals locally, and groups them into clusters. With auto-learn on, `learn/auto.mjs` runs this workflow on its own after a correction (analysis, independent case, fix, proof, draft PR); this skill is the same workflow by hand. It takes one cluster and turns it into a change that **measurably** makes the failure less likely, or says honestly that it can't.
 
 The CLI is `node ${CLAUDE_PLUGIN_ROOT}/learn/cli.mjs` (`flow-learn` below). The working copy is a checkout of the skills repo (e.g. `claude-skills`), on a fresh branch.
 

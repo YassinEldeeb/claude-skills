@@ -13,7 +13,7 @@
     {
       "name": "flow",
       "source": "./plugins/flow",
-      "description": "Shipping with AI: risk-routed workflow (small/medium/high), design challenge before code, a gate a PR can't rewrite, content-bound human approvals"
+      "description": "Shipping with AI: one command (/flow:start) that proves the risky part first, builds the shortest real path and ships with evidence; learns from your corrections in the background (auto-learn)"
     }
   ]
 }

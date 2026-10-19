@@ -2,7 +2,7 @@
 // Deterministic tier: the real hook scripts of the baseline and candidate trees, on fixtures (free).
 // Behavioral tier: `claude -p --plugin-dir <tree>/plugins/flow` in a sandbox, N runs per arm per phrasing. It costs
 // model tokens, so it never runs without --approve-spend and a budget; nothing automatic ever calls it.
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
@@ -128,13 +128,28 @@ function sandboxFor(testCase, overlay) {
 }
 
 /** A case's scorer is code from a case directory: run it in a child process, scrubbed environment, time limit. */
+/**
+ * A scorer is code an agent may have written (auto-learn's case writer): on macOS it runs under sandbox-exec with no
+ * network and no reads of the engineer's credentials or Claude state. Elsewhere it runs as before (a stated limit).
+ */
+const SANDBOX_EXEC = "/usr/bin/sandbox-exec";
+export const canConfine = () => process.platform === "darwin" && existsSync(SANDBOX_EXEC) && process.env.FLOW_SCORER_SANDBOX !== "off";
+export function confined(cmd, args) {
+  if (process.platform !== "darwin" || !existsSync(SANDBOX_EXEC) || process.env.FLOW_SCORER_SANDBOX === "off") return [cmd, args];
+  const h = homedir();
+  const secret = [".claude", ".ssh", ".aws", ".config/gh", ".gnupg", ".netrc", "Library/Keychains", ".docker"].map((p) => `(subpath "${join(h, p)}")`).join(" ");
+  // Writes only to temp dirs and /dev; no network but localhost TCP (no unix sockets: DNS and docker.sock are ways out).
+  const profile = `(version 1)(allow default)(deny network*)(allow network* (local ip "localhost:*"))(allow network* (remote ip "localhost:*"))(deny file-read* ${secret})(deny file-write*)(allow file-write* (subpath "/private/var/folders") (subpath "/private/tmp") (subpath "${tmpdir()}") (literal "/dev/null") (literal "/dev/zero") (literal "/dev/tty") (regex #"^/dev/fd/"))`;
+  return [SANDBOX_EXEC, ["-p", profile, cmd, ...args]];
+}
 const SCRUBBED = () => ({ PATH: "/usr/bin:/bin:/usr/sbin:/sbin:" + dirname(process.execPath), HOME: mkdtempSync(join(tmpdir(), "flow-score-home-")), LANG: "C" });
 async function scorer(testCase) {
   const file = join(testCase.dir, testCase.scorer ?? "score.mjs");
   if (relative(testCase.dir, file).startsWith("..")) throw new Error("the scorer must live in its case directory");
   return async ({ dir, result, ghCalls }) => {
     const script = `const { score } = await import(${JSON.stringify(file)}); const input = JSON.parse(process.argv[1]); process.stdout.write(JSON.stringify(await score(input)));`;
-    const run = spawnSync(process.execPath, ["--input-type=module", "-e", script, JSON.stringify({ dir, result: { result: result?.result ?? "" }, ghCalls })], { encoding: "utf8", timeout: 120_000, env: SCRUBBED(), cwd: dir });
+    const [cmd, args] = confined(process.execPath, ["--input-type=module", "-e", script, JSON.stringify({ dir, result: { result: result?.result ?? "" }, ghCalls })]);
+    const run = spawnSync(cmd, args, { encoding: "utf8", timeout: 120_000, env: SCRUBBED(), cwd: dir });
     try { return JSON.parse(run.stdout); } catch { return { pass: false, details: `scorer failed: ${(run.stderr || "no output").slice(0, 200)}`, scorerError: true }; }
   };
 }
@@ -190,7 +205,7 @@ export function pluginSmoke(plugin) {
   return problems;
 }
 
-export function runOnce(testCase, prompt, tree, { model, maxTurns = 25 }) {
+export async function runOnce(testCase, prompt, tree, { model, maxTurns = 25 }) {
   const dir = sandboxFor(testCase);
   const plugin = pluginCopy(tree);
   const broken = pluginSmoke(plugin);
@@ -204,7 +219,7 @@ export function runOnce(testCase, prompt, tree, { model, maxTurns = 25 }) {
   writeFileSync(join(stub, "gh"), `#!/bin/sh\necho "$@" >> "${ghLog}"\necho "stub: gh is not available in this sandbox"\n`);
   chmodSync(join(stub, "gh"), 0o755);
   const settings = join(stub, "settings.json");
-  writeFileSync(settings, JSON.stringify({ sandbox: { enabled: true, network: { allowedDomains: [] } } }));
+  writeFileSync(settings, JSON.stringify({ sandbox: { enabled: true, allowUnsandboxedCommands: false, network: { allowedDomains: [] } } }));
   const args = [
     "-p", "--model", model, "--plugin-dir", plugin, "--setting-sources", "local", "--strict-mcp-config",
     "--settings", settings, "--permission-mode", "dontAsk", "--max-turns", String(maxTurns), "--output-format", "json",
@@ -212,8 +227,8 @@ export function runOnce(testCase, prompt, tree, { model, maxTurns = 25 }) {
     "--disallowedTools", "Task", "Agent", "WebFetch", "WebSearch",
   ];
   const started = Date.now();
-  const run = spawnSync(claudeBin(), args, {
-    cwd: dir, input: prompt.text, encoding: "utf8", timeout: 15 * 60_000,
+  const run = await spawnAsync(claudeBin(), args, {
+    cwd: dir, input: prompt.text, timeout: 15 * 60_000,
     // Scrubbed: no parent-session variables, the engineer's feedback store or tokens leak into the run.
     env: { ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(CLAUDE|FLOW_|GH_|GITHUB_)/.test(k) && !/TOKEN|SECRET|KEY/.test(k))), FLOW_FEEDBACK: "off", FLOW_FEEDBACK_HOME: store, PATH: `${stub}:${process.env.PATH}` },
   });
@@ -234,30 +249,80 @@ export function withoutToolState(dir) {
   return dir;
 }
 
-export async function runBehavioral(testCase, { baseline, candidate, runs, model, budget, spent = { usd: 0 } }) {
+/** spawnSync's result shape, without blocking: several runs go at once. A timeout kills the whole process group. */
+// Each run is its own process group; if this process is told to stop, the runs stop with it (no orphaned spend).
+const groups = new Set();
+let stopping = false;
+const stopAll = (signal) => { if (stopping) return; stopping = true; for (const pid of groups) { try { process.kill(-pid, "SIGKILL"); } catch { /* gone */ } } process.exit(signal === "SIGINT" ? 130 : 143); };
+function spawnAsync(cmd, args, { cwd, input, env, timeout }) {
+  if (!groups.size && !stopping) { process.once("SIGTERM", () => stopAll("SIGTERM")); process.once("SIGINT", () => stopAll("SIGINT")); }
+  return new Promise((resolve) => {
+    const child = spawn(cmd, args, { cwd, env, stdio: ["pipe", "pipe", "pipe"], detached: true });
+    if (child.pid) groups.add(child.pid);
+    let stdout = "", stderr = "", done = false;
+    const finish = (status) => { if (done) return; done = true; groups.delete(child.pid); clearTimeout(timer); clearTimeout(grace); resolve({ status, stdout, stderr }); };
+    const killGroup = () => { try { process.kill(-child.pid, "SIGKILL"); } catch { try { child.kill("SIGKILL"); } catch { /* gone */ } } };
+    const timer = setTimeout(() => { killGroup(); stderr += "\n[flow] timed out"; }, timeout);
+    let grace = null;
+    child.stdout.setEncoding("utf8"); child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (d) => { stdout += d; });
+    child.stderr.on("data", (d) => { stderr += d; });
+    child.on("error", (error) => { stderr ||= error.message; finish(null); });
+    // A grandchild holding the pipes open must not hang the pool: after exit, wait a moment for output, then go.
+    child.on("exit", (status) => { grace = setTimeout(() => { killGroup(); finish(status); }, 5_000); });
+    child.on("close", (status) => finish(status));
+    child.stdin.on("error", () => { /* the child exited before reading */ });
+    child.stdin.end(input ?? "");
+  });
+}
+
+/** How many runs go at once (FLOW_EVAL_CONCURRENCY, default 4). */
+export const evalConcurrency = () => {
+  const raw = process.env.FLOW_EVAL_CONCURRENCY;
+  if (raw == null || raw === "") return 4;
+  const n = Number.parseInt(raw, 10);
+  return Number.isFinite(n) && n >= 1 ? n : 1;
+};
+
+export async function runBehavioral(testCase, { baseline, candidate, runs, model, budget, spent = { usd: 0 }, concurrency = evalConcurrency() }) {
   const score = await scorer(testCase);
   const arms = { baseline: [], candidate: [] };
-  // Interleaved (baseline, candidate, baseline, ...) so an outage or rate limit hits both arms alike.
-  for (const prompt of testCase.prompts) {
-    for (let i = 0; i < runs; i++) {
-      for (const [arm, tree] of Object.entries({ baseline, candidate })) {
-        if (spent.usd >= budget) { arms[arm].push({ prompt: prompt.id, heldOut: !!prompt.heldOut, skipped: "budget reached" }); continue; }
-        const run = runOnce(testCase, prompt, tree, { model, maxTurns: testCase.maxTurns });
-        try {
-          const usd = Number(run.result.total_cost_usd ?? 0);
-          spent.usd += usd;
-          const u = run.result.usage ?? {};
-          const tokens = (u.output_tokens ?? 0) + (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0);
-          // A run that errored or never took a turn says nothing about behavior: excluded, not scored as a failure.
-          if (run.result.is_error || !run.result.num_turns) { arms[arm].push({ prompt: prompt.id, heldOut: !!prompt.heldOut, error: String(run.result.result ?? "no result").slice(0, 200), usd, ms: run.ms }); continue; }
-          const verdict = await score({ dir: withoutToolState(run.dir), result: run.result, ghCalls: run.ghCalls });
-          if (verdict.scorerError) { arms[arm].push({ prompt: prompt.id, heldOut: !!prompt.heldOut, error: verdict.details, usd, ms: run.ms }); continue; }
-          arms[arm].push({ prompt: prompt.id, heldOut: !!prompt.heldOut, pass: verdict.pass, details: verdict.details, usd, ms: run.ms, turns: run.result.num_turns, tokens: tokens || null });
-        } finally { rmSync(run.dir, { recursive: true, force: true }); rmSync(run.stub, { recursive: true, force: true }); }
-      }
+  // Interleaved (baseline, candidate, baseline, ...) so an outage or rate limit hits both arms alike; results keep
+  // that order whatever finishes first.
+  const jobs = [];
+  for (const prompt of testCase.prompts) for (let i = 0; i < runs; i++) for (const [arm, tree] of Object.entries({ baseline, candidate })) jobs.push({ prompt, arm, tree });
+  const out = new Array(jobs.length);
+  let next = 0, inFlight = 0, perRun = 0;
+  const one = async (job) => {
+    const { prompt, arm, tree } = job;
+    const run = await runOnce(testCase, prompt, tree, { model, maxTurns: testCase.maxTurns });
+    try {
+      const usd = Number(run.result.total_cost_usd ?? 0);
+      spent.usd += usd;
+      perRun = Math.max(perRun, usd);
+      const u = run.result.usage ?? {};
+      const tokens = (u.output_tokens ?? 0) + (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0);
+      // A run that errored or never took a turn says nothing about behavior: excluded, not scored as a failure.
+      if (run.result.is_error || !run.result.num_turns) return { prompt: prompt.id, heldOut: !!prompt.heldOut, error: String(run.result.result ?? "no result").slice(0, 200), usd, ms: run.ms };
+      const verdict = await score({ dir: withoutToolState(run.dir), result: run.result, ghCalls: run.ghCalls });
+      if (verdict.scorerError) return { prompt: prompt.id, heldOut: !!prompt.heldOut, error: verdict.details, usd, ms: run.ms };
+      return { prompt: prompt.id, heldOut: !!prompt.heldOut, pass: verdict.pass, details: verdict.details, usd, ms: run.ms, turns: run.result.num_turns, tokens: tokens || null };
+    } finally { rmSync(run.dir, { recursive: true, force: true }); rmSync(run.stub, { recursive: true, force: true }); }
+  };
+  const worker = async () => {
+    for (;;) {
+      const index = next++;
+      if (index >= jobs.length) return;
+      const job = jobs[index];
+      // Runs in flight count at the highest cost seen so far, so the budget holds with several runs at once.
+      if (spent.usd + inFlight * perRun >= budget) { out[index] = { arm: job.arm, row: { prompt: job.prompt.id, heldOut: !!job.prompt.heldOut, skipped: "budget reached" } }; continue; }
+      inFlight++;
+      try { out[index] = { arm: job.arm, row: await one(job) }; } finally { inFlight--; }
     }
-  }
-  return { case: testCase.id, tier: "behavioral", mode: "plugin-dir", model, runsPerPrompt: runs, arms };
+  };
+  await Promise.all(Array.from({ length: Math.min(concurrency, jobs.length) }, worker));
+  for (const { arm, row } of out) arms[arm].push(row);
+  return { case: testCase.id, tier: "behavioral", mode: "plugin-dir", model, runsPerPrompt: runs, concurrency, arms };
 }
 
 // ---------- skill size (paid in every session) ----------
