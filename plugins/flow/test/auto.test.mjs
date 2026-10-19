@@ -177,6 +177,9 @@ describe("session start tells the engineer what it did, once", () => {
   });
 });
 
+// The engineer's sentence, assembled at run time: written out here, it would be "public" (this file is in the repo the
+// privacy check treats as public), and the leaky analyzer below would pass.
+const SAID = ["I said don't", "zz", "push it", "zz", "to the remote yet"].filter((w) => w !== "zz").join(" ");
 describe("the whole loop, zero spend: correction → analysis → case → fix → proof → draft PR", () => {
   test("a 'don't push' cluster becomes an enforced constraint rule and a PR; a sloppy fix is rejected", { timeout: 600_000 }, () => {
     const root = mkdtempSync(join(tmpdir(), "flow-auto-e2e-"));
@@ -186,13 +189,14 @@ describe("the whole loop, zero spend: correction → analysis → case → fix �
       // The skills repo as GitHub would have it: this checkout's committed master.
       execFileSync("git", ["clone", "-q", "--bare", repoRoot, bare]);
       // master as GitHub has it (not this branch, whose tests quote the very phrases the privacy check looks for).
-      const published = execFileSync("git", ["-C", repoRoot, "rev-parse", "origin/master"], { encoding: "utf8" }).trim();
+      let published;
+      try { published = execFileSync("git", ["-C", repoRoot, "rev-parse", "origin/master"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim(); } catch { published = "HEAD"; } // a shallow CI checkout
       execFileSync("git", ["-C", bare, "branch", "-f", "master", published]);
       writeFileSync(join(home, "config.json"), JSON.stringify({ noticeShown: "x", autoLearn: { enabled: true, repo: "acme/skills", repoUrl: bare, cloneDir: join(root, "clone"), idleMinutes: 0 } }));
       // Two sessions where the engineer said not to merge and the agent merged anyway.
       mkdirSync(join(home, "queue/pending"), { recursive: true });
       for (const s of ["s1", "s2"]) {
-        const event = { id: `e-${s}`, type: "prompt", at: "2026-10-19T09:00:00Z", session: s, repo: "web", kind: "correction", category: "unauthorized-action", keys: ["push"], text: "I said don't push it to the remote yet", objective: null };
+        const event = { id: `e-${s}`, type: "prompt", at: "2026-10-19T09:00:00Z", session: s, repo: "web", kind: "correction", category: "unauthorized-action", keys: ["push"], text: SAID, objective: null };
         writeFileSync(join(home, "queue/pending", `e-${s}.json`), JSON.stringify(event));
       }
       // A fake claude: each step is marked in its prompt.
@@ -200,7 +204,7 @@ describe("the whole loop, zero spend: correction → analysis → case → fix �
 const fs = require("fs"), path = require("path");
 let prompt = ""; process.stdin.on("data", (d) => prompt += d).on("end", () => {
   const out = (result) => process.stdout.write(JSON.stringify({ result, num_turns: 1, is_error: false, total_cost_usd: 0 }));
-  if (prompt.includes("FLOW-AUTO-STEP: analyze") && process.env.LEAKY) return out(JSON.stringify({ synthetic: "The engineer wrote: I said don't push it to the remote yet, and the agent pushed anyway.", rootCause: "No rule.", mechanism: "deterministic", kind: "deterministic" }));
+  if (prompt.includes("FLOW-AUTO-STEP: analyze") && process.env.LEAKY) return out(JSON.stringify({ synthetic: "The engineer wrote: " + process.env.LEAKY + ", and the agent pushed anyway.", rootCause: "No rule.", mechanism: "deterministic", kind: "deterministic" }));
   if (prompt.includes("FLOW-AUTO-STEP: analyze")) return out(JSON.stringify({ synthetic: "The engineer said not to push the branch; later in the session the agent pushed it anyway.", rootCause: "No constraint rule turns a stated no-push into a refusal.", mechanism: "deterministic", kind: "deterministic" }));
   if (prompt.includes("FLOW-AUTO-STEP: cases")) {
     const id = /cases\\/(auto-[a-z0-9-]+)\\//.exec(prompt)[1];
@@ -246,8 +250,8 @@ let prompt = ""; process.stdin.on("data", (d) => prompt += d).on("end", () => {
       mkdirSync(join(leakyHome, "queue/pending"), { recursive: true });
       const leakyConfig = JSON.parse(readFileSync(join(home, "config.json"), "utf8"));
       writeFileSync(join(leakyHome, "config.json"), JSON.stringify({ ...leakyConfig, autoLearn: { ...leakyConfig.autoLearn, cloneDir: join(root, "clone3") } }));
-      for (const s of ["s1", "s2"]) writeFileSync(join(leakyHome, "queue/pending", `e-${s}.json`), JSON.stringify({ id: `e-${s}`, type: "prompt", at: "2026-10-19T09:00:00Z", session: s, repo: "web", kind: "correction", category: "unauthorized-action", keys: ["push"], text: "I said don't push it to the remote yet", objective: null }));
-      const leaky = JSON.parse(spawnSync(process.execPath, [join(plugin, "learn/auto.mjs"), "--print"], { env: { ...env, FLOW_FEEDBACK_HOME: leakyHome, LEAKY: "1" }, encoding: "utf8", timeout: 300_000 }).stdout || "{}");
+      for (const s of ["s1", "s2"]) writeFileSync(join(leakyHome, "queue/pending", `e-${s}.json`), JSON.stringify({ id: `e-${s}`, type: "prompt", at: "2026-10-19T09:00:00Z", session: s, repo: "web", kind: "correction", category: "unauthorized-action", keys: ["push"], text: SAID, objective: null }));
+      const leaky = JSON.parse(spawnSync(process.execPath, [join(plugin, "learn/auto.mjs"), "--print"], { env: { ...env, FLOW_FEEDBACK_HOME: leakyHome, LEAKY: SAID }, encoding: "utf8", timeout: 300_000 }).stdout || "{}");
       assert.equal(leaky.done?.[0]?.outcome, "refused-private", JSON.stringify(leaky));
       assert.match(leaky.done[0].reasons.join(" "), /repeats 5\+ words from the engineer's sessions/);
       assert.doesNotMatch(execFileSync("git", ["-C", bare, "log", "-1", "--format=%B", "flow-learn/unauthorized-action--push"], { encoding: "utf8" }), /I said don't push/);
@@ -255,7 +259,7 @@ let prompt = ""; process.stdin.on("data", (d) => prompt += d).on("end", () => {
       const sloppyHome = join(root, "store2");
       mkdirSync(join(sloppyHome, "queue/pending"), { recursive: true });
       writeFileSync(join(sloppyHome, "config.json"), JSON.stringify({ ...JSON.parse(readFileSync(join(home, "config.json"), "utf8")), autoLearn: { ...JSON.parse(readFileSync(join(home, "config.json"), "utf8")).autoLearn, cloneDir: join(root, "clone2") } }));
-      for (const s of ["s1", "s2"]) writeFileSync(join(sloppyHome, "queue/pending", `e-${s}.json`), JSON.stringify({ id: `e-${s}`, type: "prompt", at: "2026-10-19T09:00:00Z", session: s, repo: "web", kind: "correction", category: "unauthorized-action", keys: ["push"], text: "I said don't push it to the remote yet", objective: null }));
+      for (const s of ["s1", "s2"]) writeFileSync(join(sloppyHome, "queue/pending", `e-${s}.json`), JSON.stringify({ id: `e-${s}`, type: "prompt", at: "2026-10-19T09:00:00Z", session: s, repo: "web", kind: "correction", category: "unauthorized-action", keys: ["push"], text: SAID, objective: null }));
       const sloppy = JSON.parse(spawnSync(process.execPath, [join(plugin, "learn/auto.mjs"), "--print"], { env: { ...env, FLOW_FEEDBACK_HOME: sloppyHome, SLOPPY: "1" }, encoding: "utf8", timeout: 590_000 }).stdout || "{}");
       assert.equal(sloppy.done?.[0]?.outcome, "not-proven", JSON.stringify(sloppy));
       assert.equal(sloppy.done[0].url, undefined);
