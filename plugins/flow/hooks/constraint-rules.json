@@ -1,4 +1,22 @@
 {
   "_doc": "Session constraints an engineer states in a prompt ('don't merge'), enforced by guard-bash.mjs while active (best effort; GitHub's required checks are the hard layer). A rule only ever restricts. phrases start it, release lifts it (both matched on engineer prompts only), blocks are Bash patterns refused while it is active, allow are exceptions. Changes arrive as reviewed flow-learn PRs labelled 'enforcement'.",
-  "rules": []
+  "rules": [
+    {
+      "id": "verify-before-report",
+      "why": "do not tell anyone the work is done, fixed or recorded until a test, build or check has passed after your last edit; run it first and report its output",
+      "covers": ["report"],
+      "phrases": [
+        "\\b(don'?t|do not|never|stop)\\b[^.?!]{0,40}\\b(say|claim|report|tell me|announce)\\b[^.?!]{0,40}\\b(done|fixed|complete|working)\\b",
+        "\\bverify (it )?before (you )?(report|claim|say)",
+        "\\bprove it\\b",
+        "\\bshow me (the )?(test|build|check) (output|results?)\\b"
+      ],
+      "release": ["\\bno need to (verify|re-?run)\\b", "\\bskip (the )?verification\\b"],
+      "blocks": [
+        "\\b(gh\\s+(pr|issue)\\s+(comment|review|edit)|gh\\s+api\\b[\\s\\S]*comments|tmux\\s+send-keys|curl\\b[\\s\\S]*(-X\\s*POST|\\s-d\\b))[\\s\\S]*\\b(done|fixed|complete[d]?|resolved|finished|implemented|landed|recorded|working|ready|addressed|passing)\\b",
+        "\\b(done|fixed|complete[d]?|resolved|finished|implemented|landed|recorded|working|ready|addressed|passing)\\b[\\s\\S]*(>>?|\\btee\\b)\\s*(-a\\s+)?\\S*(status|checkpoint|report)",
+        "(>>?|\\btee\\b)\\s*(-a\\s+)?\\S*(status|checkpoint|report)[\\s\\S]*\\b(done|fixed|complete[d]?|resolved|finished|implemented|landed|recorded|working|ready|addressed|passing)\\b"
+      ]
+    }
+  ]
 }
