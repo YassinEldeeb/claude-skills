@@ -185,7 +185,9 @@ describe("the whole loop, zero spend: correction → analysis → case → fix �
       mkdirSync(home); mkdirSync(bin);
       // The skills repo as GitHub would have it: this checkout's committed master.
       execFileSync("git", ["clone", "-q", "--bare", repoRoot, bare]);
-      execFileSync("git", ["-C", bare, "branch", "-f", "master", "HEAD"]);
+      // master as GitHub has it (not this branch, whose tests quote the very phrases the privacy check looks for).
+      const published = execFileSync("git", ["-C", repoRoot, "rev-parse", "origin/master"], { encoding: "utf8" }).trim();
+      execFileSync("git", ["-C", bare, "branch", "-f", "master", published]);
       writeFileSync(join(home, "config.json"), JSON.stringify({ noticeShown: "x", autoLearn: { enabled: true, repo: "acme/skills", repoUrl: bare, cloneDir: join(root, "clone"), idleMinutes: 0 } }));
       // Two sessions where the engineer said not to merge and the agent merged anyway.
       mkdirSync(join(home, "queue/pending"), { recursive: true });
@@ -247,7 +249,7 @@ let prompt = ""; process.stdin.on("data", (d) => prompt += d).on("end", () => {
       for (const s of ["s1", "s2"]) writeFileSync(join(leakyHome, "queue/pending", `e-${s}.json`), JSON.stringify({ id: `e-${s}`, type: "prompt", at: "2026-10-19T09:00:00Z", session: s, repo: "web", kind: "correction", category: "unauthorized-action", keys: ["push"], text: "I said don't push it to the remote yet", objective: null }));
       const leaky = JSON.parse(spawnSync(process.execPath, [join(plugin, "learn/auto.mjs"), "--print"], { env: { ...env, FLOW_FEEDBACK_HOME: leakyHome, LEAKY: "1" }, encoding: "utf8", timeout: 300_000 }).stdout || "{}");
       assert.equal(leaky.done?.[0]?.outcome, "refused-private", JSON.stringify(leaky));
-      assert.match(leaky.done[0].reasons.join(" "), /repeats the engineer's words/);
+      assert.match(leaky.done[0].reasons.join(" "), /repeats 5\+ words from the engineer's sessions/);
       assert.doesNotMatch(execFileSync("git", ["-C", bare, "log", "-1", "--format=%B", "flow-learn/unauthorized-action--push"], { encoding: "utf8" }), /I said don't push/);
       // A sloppy fix (a rule that refuses every git command) is rejected by the gate: no PR.
       const sloppyHome = join(root, "store2");

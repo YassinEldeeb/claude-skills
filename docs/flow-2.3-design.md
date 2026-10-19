@@ -23,6 +23,16 @@ Every attempt is a line in `auto.jsonl`. The next attended session start shows t
 - **The agents:** headless `claude -p` with `--setting-sources local --strict-mcp-config`, so none of the engineer's settings, MCP servers or plugins load. `FLOW_FEEDBACK=off` and `FLOW_AUTO_CHILD=1`, so nothing they do is captured or starts another run. Writes are scoped to the clone's allowed directories. Bash only for the case writer (to calibrate), sandboxed with no network.
 - **Pushing and the PR:** the push and `gh pr create` use the engineer's own git and gh credentials. The gh wrapper allows only create, edit, view, list, labels and GET calls.
 
+## What keeps it safe
+
+Two independent reviews blocked the first versions. The rules now:
+
+- **No Bash for any agent,** writes scoped to exact paths, and a check before anything runs that nothing else changed (ignored files included). Claude Code's `.claude/` state is removed after each agent, so nothing carries over.
+- **A fix may change only** an existing skill's body (no frontmatter, no `` !`command` `` lines, no new skill), `templates/rules.md`, or the constraint rules (data).
+- **Agent-written scorers run under `sandbox-exec`** (macOS): no network but localhost TCP, no writes outside temp dirs, no reads of `~/.claude`, `~/.ssh`, keychains or gh's config. Without that sandbox, behavioral cases are refused. Eval runs can't leave their Bash sandbox.
+- **Privacy, before any proof:** the analysis, the change, every added line and every new path are checked against the engineer's sessions (whole transcripts: prompts, replies, tool output). The check looks for 5-word runs and identifiers from them, home paths, real emails, URLs, secrets, and repo, user and git names. Runs, identifiers and names already public in the skills repo don't count. A hit ends the attempt: `refused-private`, no PR.
+- **The base is pinned by sha** after the fetch, and git runs with fsmonitor and hooks off.
+
 ## Cost
 
 It runs on the engineer's Claude plan; a Max plan has no extra charge. It uses plan quota: an attempt is three agent runs plus the proof (one run per prompt per arm, across the target case and the behavioral suite). That's why it waits for idle time and is capped per day.
@@ -39,6 +49,10 @@ Off by default. `flow auto-learn on` / `off`, typed in a prompt (pasted text nev
 - A second run with nothing new does nothing.
 
 There are also tests for the switch (typed only, never pasted, never by an agent), picking, the detached start, the classifier and the session-start notice.
+
+## First real run
+
+On 2026-10-19 the loop ran on real corrections: 6 "said done without verifying" incidents across 5 sessions. It opened [#4](https://github.com/YassinEldeeb/claude-skills/pull/4), a draft with a `verify-before-report` constraint rule and an independent deterministic case (24 fixtures, `enforced`). That run used the code before the second review's hardening. Its text and diff pass the hardened privacy check against those 5 transcripts. The first attempt before it failed: the clone sat under `~/.claude`, where Claude Code refuses headless edits, so the clone moved to `~/.cache`.
 
 ## Limits
 
