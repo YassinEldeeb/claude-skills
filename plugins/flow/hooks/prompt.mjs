@@ -89,7 +89,9 @@ try {
     });
   }
 
-  const still = human ? safe(() => loadSession(input.session_id).constraints ?? [], []) : [];
+  // A paste-only prompt still gets the reminder: constraints are the engineer's, whoever wrote this prompt's text.
+  const attended = typeof input.prompt === "string" && input.prompt.trim() !== "" && typedByEngineer(input) && !isAutomated(input.prompt);
+  const still = attended ? safe(() => loadSession(input.session_id).constraints ?? [], []) : [];
   if (still.length && !context.some((c) => c.includes("Constraint noted"))) {
     context.push(`[flow] Active constraints the engineer set this session: ${describeConstraints(still, constraintRules()).join("; ")}.`);
   }

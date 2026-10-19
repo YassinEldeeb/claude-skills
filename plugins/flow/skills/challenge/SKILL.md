@@ -49,7 +49,7 @@ Medium work answers only `simplest` and 2 `failureModes`.
   - missing failure modes and safety invariants;
   - assumptions presented as facts;
   - tests that would pass while the real system breaks.
-- Fix what it finds and run it again until nothing new comes up.
+- Fix what it finds and run it again until nothing new comes up, at most 3 passes. A fourth pass that still finds a new kind of problem is a 🔴 decision: the design, not the wording, needs the human.
 - Save its final notes as `.flow/tasks/<ID>/challenge-review.md`, with your response under each finding. End with `verdict: pass`, or `verdict: blocked` and why. Never edit its findings.
 
 ## 5. The checkpoint 1 screen

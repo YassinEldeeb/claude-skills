@@ -1,2 +1,3 @@
 .flow/tasks/*/.approved
 node_modules
+logs/

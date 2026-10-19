@@ -113,13 +113,27 @@ export function violatedConstraint(command, rules, active) {
   return null;
 }
 
-/** An engineer's explicit spend approval in a prompt ("approve spend up to $20"), in USD, or null. */
 /**
  * The engineer's own words: the prompt without pasted blocks. A pasted README, log or email can say "approve spend up
  * to $20" or "don't merge"; only text the engineer typed may grant spend, set a constraint or count as a correction.
  */
-export const ownWords = (text) => String(text ?? "").replace(/<pasted_content\b[^>]*>[\s\S]*?<\/pasted_content\b[^>]*>/gi, " ");
+export function ownWords(text) {
+  let rest = String(text ?? ""), out = "";
+  const open = /<pasted_content\b([^>]*)>/i;
+  for (let m = open.exec(rest); m; m = open.exec(rest)) {
+    out += rest.slice(0, m.index) + " ";
+    const after = rest.slice(m.index + m[0].length);
+    // The closing tag repeats the opening tag's id; a paste can't end its own block early with a bare closing tag.
+    const id = /\bid\s*=\s*"([^"]*)"/i.exec(m[1])?.[1];
+    const close = id != null ? new RegExp(`</pasted_content\\s+id\\s*=\\s*"${id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"\\s*>`, "i") : /<\/pasted_content\b[^>]*>/i;
+    const end = close.exec(after);
+    if (!end) return out; // unclosed: everything after it is pasted (fail closed)
+    rest = after.slice(end.index + end[0].length);
+  }
+  return out + rest;
+}
 
+/** An engineer's explicit spend approval in a prompt ("approve spend up to $20"), in USD, or null. */
 export function spendGrant(text) {
   const m = /\b(approve[sd]?|ok(ay)?|go ahead|you can|authori[sz]e[sd]?)\b[^.?!\n]{0,30}\b(spend|spending|eval budget|budget)\b[^.?!\n$\d]{0,20}\$\s?(\d+(?:\.\d+)?)/i.exec(String(text ?? ""));
   return m && !isAutomated(text) ? Number(m[4]) : null;

@@ -1,6 +1,6 @@
 ## How agents work here (flow)
 
-- **Start every non-trivial task with `/flow:start`.** It classifies the risk (small / medium / high) and runs every step itself, coming back only at a human checkpoint. Small changes skip the ceremony. Never hand the engineer a flow command to run next; run that step.
+- **Start every non-trivial task with `/flow:start`.** It classifies the risk (small / medium / high) and runs every step itself, coming back only at a human checkpoint. Small changes skip the ceremony. Never hand the engineer a flow command to run next; run that step (approvals excepted: only a human gives them).
 - **Prove it first, show it often:** run the risky part on real data before building broadly, build the thinnest real end-to-end path next, and end every milestone with something the engineer can see plus the same ≤3 outcome numbers (`.flow/tasks/<ID>/progress.md`).
 - **Two strikes, then rethink:** the same kind of bug fixed twice, two rounds off-track, or a forecast that misses the deadline means stop adding code and bring plan B as a 🔴 decision.
 - **Done** = the agreed behavior works in the deployed system, with evidence. Merged is not done; green tests are not done.

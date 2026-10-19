@@ -1,11 +1,11 @@
 ---
 name: start
-description: The one entry point of flow. The engineer types /flow:start <goal> once; you classify the risk, then run every step yourself (prove the risky part first, build the shortest real path, verify, ship) and come back only at a human checkpoint or when it's done. Use for /flow:start <goal>, whenever you begin work in a repo that has .flow/config.json, and to continue a task already on the branch.
+description: Use for any non-trivial task in a repo that has .flow/config.json (a feature, a bug fix, an integration, a job), for /flow:start <goal>, and to continue a flow task on the branch. The one entry point of flow - it classifies the risk, then runs every step itself (prove the risky part first, the shortest real path, verify, ship) and comes back only at a human checkpoint or when it's done.
 ---
 
 # Start
 
-One command runs the whole task. The engineer types `/flow:start <goal>` once. You run every step below in order, without being told the next one, and come back only at a checkpoint (below) or when the work is done. **Never end a turn by telling the engineer to run a flow command: run that step yourself.**
+One command runs the whole task. The engineer types `/flow:start <goal>` once. You run every step below in order, without being told the next one, and come back only at a checkpoint (below) or when the work is done. **Never end a turn by telling the engineer to run a flow command: run that step yourself.** The one exception is an approval, which only a human gives.
 
 The goal: catch expensive mistakes (wrong problem, wrong architecture, wrong economics, wrong test method) while they are cheap, show working results early and often, and spend no ceremony on small work.
 
@@ -26,10 +26,10 @@ Read the relevant code, recent PRs, logs and data. For a bug, find the first cau
 | Tier | Steps, all run by you | Human |
 |---|---|---|
 | Small | Reproduce → fix → test → PR with a `## Evidence` section. No task. | None |
-| Medium | Task → prove it first (§5) → `/flow:build` → `/flow:verify` → `/flow:ship` | None, unless you need an override or a 🔴 decision |
+| Medium | Task → prove it first (§5) → `/flow:challenge` (light) → `/flow:build` → `/flow:verify` → `/flow:ship` | None, unless you need an override or a 🔴 decision |
 | High | Production evidence → task → prove it first (§5) → `/flow:challenge` → draft PR with only the spec → **checkpoint 1** → `flow.mjs sync` → `/flow:build` → `/flow:verify` → `/flow:ship` (**checkpoint 3**) | `spec@` before code, `ship@` before merge |
 
-Each `/flow:<step>` is a skill: load it with the Skill tool (`flow:build`, `flow:verify`, ...) and follow it to its end before the next one. Don't fold a step into another: a medium task isn't done until every criterion has evidence in `task.json`, `verify.md` ends with a verdict, and a PR is open (or the one thing blocking it is named).
+Each `/flow:<step>` is a skill: load it with the Skill tool (`flow:build`, `flow:verify`, ...) and follow it to its end before the next one. Don't fold a step into another: a medium task isn't done until it has its light challenge (`simplest`, 2 `failureModes`, and the `capacity` block with `cut80` when a capacity signal fires), every criterion has evidence in `task.json`, `verify.md` ends with a verdict, and a PR is open (or the one thing blocking it is named).
 
 ## 4. The task (medium and high)
 
@@ -53,8 +53,8 @@ Agree the criteria and how each will be proven before substantial implementation
 Plans fail on the assumption nobody ran: a throughput that turns hours into days, an access nobody has, a dependency that is off in production. Before building broadly:
 
 1. **Name the one assumption** that would sink the plan (time and cost at real volume, access you don't control, whether the output is useful).
-2. **Run the shape you plan to build on a real sample**, with production's model and settings. A throwaway script is fine; for high work keep it outside the repo (the edit hook holds repo code until the spec is approved).
-3. **Forecast the whole workload from the measurement**, heaviest real case included, against the target and deadline. Record it in `capacity` (`source: measured`, `ref`, `at`, and `latency.fullCompletion`) and as round 0 in `progress.md` (§6).
+2. **Run the shape you plan to build on a real sample**, with production's model and settings. A throwaway script is fine; for high work keep it outside the repo (the edit hook holds repo code until the spec is approved). Production access, or model spend beyond a few dollars, needs the engineer's go-ahead first (🔴).
+3. **Forecast the whole workload from the measurement**, heaviest real case included, against the target and deadline. Record the sample run in `capacity` as `source: measured` (`ref`, `at`), the whole-workload forecast as `latency.fullCompletion` with `source: estimate` and a `basis` naming that run, and both as round 0 in `progress.md` (§6). A number you didn't run is never `measured`.
 4. **If it misses, change the design now:** plan B (prefer an existing faster path) as a 🔴 decision with both forecasts.
 
 Skip only when nothing scales and nothing depends on something you haven't touched; say so in `log`.
@@ -92,4 +92,4 @@ Everything else is yours to decide.
 
 ## Keep going
 
-Before you end a turn, the task is at a checkpoint or 🔴 decision (one ready-to-paste ask, and you keep doing what doesn't depend on it), waiting on something outside the session (name it), or done (deployed and verified). Otherwise, continue. A later prompt on this branch resumes from `progress.md` and `flow.mjs status <ID>`.
+Before you end a turn, the task is at a checkpoint or 🔴 decision (one ready-to-paste ask, and you keep doing what doesn't depend on it), waiting on something outside the session (name it), or done (deployed and verified). Otherwise, continue. Stop at once when the engineer says stop or pause, or asks about something else; answer that instead. A later prompt about this task resumes it from `progress.md` and `flow.mjs status <ID>`.

@@ -1,11 +1,10 @@
 // The model client. In this repo it is a local stand-in for the production provider: it returns at once, but it
-// accounts what the provider would take and charge in `usage()` and in logs/model-usage.jsonl (the provider's usage
-// dashboard). Time and price grow with the input; the provider publishes no formula.
+// accounts what the provider would take and charge in `usage()` and in its usage record (the provider's dashboard). Time and price grow with the input; the provider publishes no formula.
 import { appendFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-// The usage log sits in the repo's logs/, wherever the caller runs from.
+// The usage record sits in the repo's logs/ (git-ignored), wherever the caller runs from.
 const LOGS = join(dirname(fileURLToPath(import.meta.url)), "../logs");
 
 const MAX_BATCH = 50, MAX_CHARS = 12_000;

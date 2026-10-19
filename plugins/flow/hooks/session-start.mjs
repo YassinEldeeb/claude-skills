@@ -48,7 +48,7 @@ try {
     const held = (flow.config.approvalBeforeBuild ?? ["high"]).includes(task.tier) && !approved;
     lines.push(`[flow] Task ${id} (${task.tier}) "${task.title}" is on this branch.${held
       ? ` Its spec is not approved: code edits are held until an approver posts \`${approveLine(id, "spec", hash)}\`${task.pr ? ` on PR #${task.pr}` : " on its draft PR"} and you run \`node .github/flow/flow.mjs sync ${id}\`.`
-      : ""}${open.length ? ` Open 🔴 decisions: ${open.join(", ")}.` : ""} State lives in .flow/tasks/${id}/ (progress.md has the rounds); check it with \`node .github/flow/flow.mjs status ${id}\` and continue from the next step yourself.`);
+      : ""}${open.length ? ` Open 🔴 decisions: ${open.join(", ")}.` : ""} State lives in .flow/tasks/${id}/ (progress.md has the rounds); check it with \`node .github/flow/flow.mjs status ${id}\`. When the engineer's request is about this task, continue from its next step yourself.`);
   }
   if (!mine.length) lines.push("[flow] No task on this branch: fine for a small change; for medium or high work run /flow:start before editing code.");
   const repoLib = join(root, ".github/flow/lib.mjs");
