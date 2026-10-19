@@ -50,9 +50,12 @@ describe("picking and starting", () => {
   test("new incidents, outside the cooldown, within the daily cap; personal clusters never", () => {
     const at = Date.parse("2026-10-19T12:00:00Z");
     assert.equal(pickCluster({ clusters: [c("a", 2), c("b", 5)], state: {}, attemptsToday: 0, cfg, at }).id, "b");
-    assert.equal(pickCluster({ clusters: [c("b", 5)], state: { b: { occurrences: 5, at: "2026-10-10T00:00:00Z" } }, attemptsToday: 0, cfg, at }), null, "nothing new since the last attempt");
-    assert.equal(pickCluster({ clusters: [c("b", 6)], state: { b: { occurrences: 5, at: "2026-10-19T11:00:00Z" } }, attemptsToday: 0, cfg, at }), null, "cooldown");
-    assert.equal(pickCluster({ clusters: [c("b", 6)], state: { b: { occurrences: 5, at: "2026-10-18T11:00:00Z" } }, attemptsToday: 0, cfg, at }).id, "b");
+    assert.equal(pickCluster({ clusters: [c("b", 5)], state: { b: { occurrences: 5, at: "2026-10-10T00:00:00Z", outcome: "not-proven" } }, attemptsToday: 0, cfg, at }), null, "nothing new since the last attempt");
+    assert.equal(pickCluster({ clusters: [c("b", 6)], state: { b: { occurrences: 5, at: "2026-10-19T11:00:00Z", outcome: "pr" } }, attemptsToday: 0, cfg, at }), null, "cooldown");
+    assert.equal(pickCluster({ clusters: [c("b", 6)], state: { b: { occurrences: 5, at: "2026-10-18T11:00:00Z", outcome: "not-proven" } }, attemptsToday: 0, cfg, at }).id, "b");
+    // A failed attempt (a crash, a refused edit) settles nothing: it retries after an hour, without new incidents.
+    assert.equal(pickCluster({ clusters: [c("b", 5)], state: { b: { occurrences: 5, at: "2026-10-19T11:30:00Z", outcome: "no-fix" } }, attemptsToday: 0, cfg, at }), null, "not within the hour");
+    assert.equal(pickCluster({ clusters: [c("b", 5)], state: { b: { occurrences: 5, at: "2026-10-19T10:30:00Z", outcome: "no-fix" } }, attemptsToday: 0, cfg, at }).id, "b");
     assert.equal(pickCluster({ clusters: [c("b", 6)], state: {}, attemptsToday: 3, cfg, at }), null, "daily cap");
     assert.equal(pickCluster({ clusters: [c("p", 9, { target: { file: null, mechanism: "personal" } })], state: {}, attemptsToday: 0, cfg, at }), null);
   });
@@ -144,7 +147,7 @@ describe("the whole loop, zero spend: correction → analysis → case → fix �
       // The skills repo as GitHub would have it: this checkout's committed master.
       execFileSync("git", ["clone", "-q", "--bare", repoRoot, bare]);
       execFileSync("git", ["-C", bare, "branch", "-f", "master", "HEAD"]);
-      writeFileSync(join(home, "config.json"), JSON.stringify({ noticeShown: "x", autoLearn: { enabled: true, repo: "acme/skills", repoUrl: bare, idleMinutes: 0 } }));
+      writeFileSync(join(home, "config.json"), JSON.stringify({ noticeShown: "x", autoLearn: { enabled: true, repo: "acme/skills", repoUrl: bare, cloneDir: join(root, "clone"), idleMinutes: 0 } }));
       // Two sessions where the engineer said not to merge and the agent merged anyway.
       mkdirSync(join(home, "queue/pending"), { recursive: true });
       for (const s of ["s1", "s2"]) {
@@ -200,7 +203,7 @@ let prompt = ""; process.stdin.on("data", (d) => prompt += d).on("end", () => {
       // A sloppy fix (a rule that refuses every git command) is rejected by the gate: no PR.
       const sloppyHome = join(root, "store2");
       mkdirSync(join(sloppyHome, "queue/pending"), { recursive: true });
-      writeFileSync(join(sloppyHome, "config.json"), readFileSync(join(home, "config.json")));
+      writeFileSync(join(sloppyHome, "config.json"), JSON.stringify({ ...JSON.parse(readFileSync(join(home, "config.json"), "utf8")), autoLearn: { ...JSON.parse(readFileSync(join(home, "config.json"), "utf8")).autoLearn, cloneDir: join(root, "clone2") } }));
       for (const s of ["s1", "s2"]) writeFileSync(join(sloppyHome, "queue/pending", `e-${s}.json`), JSON.stringify({ id: `e-${s}`, type: "prompt", at: "2026-10-19T09:00:00Z", session: s, repo: "web", kind: "correction", category: "unauthorized-action", keys: ["push"], text: "I said don't push", objective: null }));
       const sloppy = JSON.parse(spawnSync(process.execPath, [join(plugin, "learn/auto.mjs"), "--print"], { env: { ...env, FLOW_FEEDBACK_HOME: sloppyHome, SLOPPY: "1" }, encoding: "utf8", timeout: 590_000 }).stdout || "{}");
       assert.equal(sloppy.done?.[0]?.outcome, "not-proven", JSON.stringify(sloppy));

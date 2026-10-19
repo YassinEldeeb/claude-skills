@@ -31,7 +31,7 @@ const USAGE = `flow-learn
   rollback PR --candidate DIR --repo OWNER/NAME [--base REF]
                              Open a draft PR reverting a merged improvement
   report [--refresh]         The measurement report (--refresh reads proposed PRs' states from GitHub)
-  auto status | on | off | run [--session ID]
+  auto status | on | off | run [--session ID] [--retry-now]
                              Auto-learn: after a correction, analyze, fix, prove and open a draft PR in the background
                              (opt-in; on and off are the engineer's; "flow auto-learn on" typed in a prompt does the same)`;
 
@@ -169,7 +169,7 @@ const commands = {
       saveConfig({ ...c, autoLearn: { ...(c.autoLearn ?? {}), enabled: sub === "on" } });
       return print(`auto-learn ${sub}`);
     }
-    if (sub === "run") return print(await autoRun({ session: opt("session") }));
+    if (sub === "run") return print(await autoRun({ session: opt("session"), retryNow: flag("retry-now") }));
     print({ ...autoConfig(), recent: readLog("auto.jsonl").slice(-10) });
   },
   report() {

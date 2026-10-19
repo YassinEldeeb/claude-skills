@@ -8,7 +8,7 @@ flow 2.1 captured corrections and could turn a cluster into a proven fix, but on
 
 1. **Wait** until the triggering session's transcript has been quiet for `idleMinutes` (default 10, or at once when the session ended). Give up after `maxIdleWaitHours`; the next trigger retries.
 2. **Classify** that session's typed prompts the lexicon didn't capture, with Haiku (`classifierModel`), into the queue. The lexicon catches about 1 correction in 5 (2.1's measurement); this catches the implicit ones ("what have you been doing for 2 hours?!"). Only valid categories for prompts that exist become incidents.
-3. **Pick** one cluster that has new incidents since its last attempt, outside its cooldown (`cooldownHours`, 24), within the daily cap (`maxAttemptsPerDay`, 3). Personal and unclassified clusters are never picked.
+3. **Pick** one cluster that has new incidents since its last settled attempt (a PR, or not proven), outside its cooldown (`cooldownHours`, 24), within the daily cap (`maxAttemptsPerDay`, 3). An attempt that failed for another reason (a crash, a refused edit) is retried after an hour. Personal and unclassified clusters are never picked.
 4. **Analyze** (a fresh headless agent): reads the cluster and up to 3 of its transcripts and returns a synthetic failure description and a root cause. An answer that looks like it holds a secret is dropped.
 5. **Cases** (a second fresh agent): gets only the synthetic description and the case format, and writes `learn/cases/auto-<cluster>-<id>/`. It never sees the fix or the threads, which keeps the proof independent.
 6. **Fix** (a third agent): the smallest change in skills, `templates/rules.md` or `hooks/constraint-rules.json`.
@@ -19,7 +19,7 @@ Every attempt is a line in `auto.jsonl`. The next attended session start shows t
 
 ## Where it runs
 
-- **The clone:** `~/.claude/flow-feedback/auto/repo`, a private clone of the skills repo (`autoLearn.repo`, default `YassinEldeeb/claude-skills`). It's reset to the default branch before each attempt.
+- **The clone:** `~/.cache/flow-learn/skills` (`autoLearn.cloneDir`), a private clone of the skills repo (`autoLearn.repo`, default `YassinEldeeb/claude-skills`). It's reset to the default branch before each attempt. It sits outside `~/.claude` because Claude Code refuses headless edits under `.claude` directories; the first real run hit exactly that.
 - **The agents:** headless `claude -p` with `--setting-sources local --strict-mcp-config`, so none of the engineer's settings, MCP servers or plugins load. `FLOW_FEEDBACK=off` and `FLOW_AUTO_CHILD=1`, so nothing they do is captured or starts another run. Writes are scoped to the clone's allowed directories. Bash only for the case writer (to calibrate), sandboxed with no network.
 - **Pushing and the PR:** the push and `gh pr create` use the engineer's own git and gh credentials. The gh wrapper allows only create, edit, view, list, labels and GET calls.
 

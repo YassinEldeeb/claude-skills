@@ -34,6 +34,8 @@ export const AUTO_DEFAULTS = {
   proveRuns: 1,
   repo: "YassinEldeeb/claude-skills",
   repoUrl: null,
+  // Outside ~/.claude: Claude Code refuses headless edits under .claude directories.
+  cloneDir: null,
   base: "origin/master",
 };
 export const autoConfig = (c = config()) => ({ ...AUTO_DEFAULTS, ...(c.autoLearn ?? {}), ...(process.env.FLOW_AUTO_IDLE_MIN ? { idleMinutes: Number(process.env.FLOW_AUTO_IDLE_MIN) } : {}) });
@@ -186,19 +188,27 @@ Answer with only JSON: {"corrections": [{"i": <index>, "category": "<category>"}
 
 // ---------- pick ----------
 
-export function pickCluster({ clusters, state, attemptsToday, cfg, at = Date.now() }) {
+/** Outcomes that settle a cluster until it has new incidents; anything else (a crash, a refused edit) retries in an hour. */
+export const SETTLED = ["pr", "not-proven", "not-proposed"];
+export function pickCluster({ clusters, state, attemptsToday, cfg, at = Date.now(), retryNow = false }) {
   if (attemptsToday >= cfg.maxAttemptsPerDay) return null;
+  const since = (c) => (state[c.id]?.at ? at - Date.parse(state[c.id].at) : Infinity);
   const open = clusters.filter((c) => c.defect && c.target?.file && ["instruction", "deterministic"].includes(c.target.mechanism))
-    .filter((c) => (state[c.id]?.occurrences ?? 0) < c.occurrences)
-    .filter((c) => !state[c.id]?.at || at - Date.parse(state[c.id].at) >= cfg.cooldownHours * 3600_000);
+    .filter((c) => {
+      const s = state[c.id];
+      if (!s) return true;
+      if (!SETTLED.includes(s.outcome)) return retryNow || since(c) >= 3600_000;
+      return s.occurrences < c.occurrences && since(c) >= cfg.cooldownHours * 3600_000;
+    });
   return open.sort((a, b) => Number(b.actionable) - Number(a.actionable) || b.occurrences - a.occurrences)[0] ?? null;
 }
 
 // ---------- the private clone ----------
 
 function git(dir, args, opts = {}) { return execFileSync("git", args, { cwd: dir, encoding: "utf8", timeout: 180_000, stdio: ["ignore", "pipe", "pipe"], ...opts }); }
+export const cloneDir = (cfg) => cfg.cloneDir ?? join(homedir(), ".cache", "flow-learn", "skills");
 export function prepareClone(cfg) {
-  const dir = path("auto/repo");
+  const dir = cloneDir(cfg);
   const url = cfg.repoUrl ?? `https://github.com/${cfg.repo}.git`;
   if (!existsSync(join(dir, ".git"))) { mkdirSync(dirname(dir), { recursive: true, mode: 0o700 }); git(dirname(dir), ["clone", "-q", url, dir]); }
   git(dir, ["fetch", "-q", "origin"]);
@@ -276,7 +286,7 @@ Answer with only JSON: {"change": "<what you changed and why, 1-2 sentences>"}`,
 
 // ---------- the run ----------
 
-export async function run({ session = null, transcript = null, now: at = Date.now() } = {}) {
+export async function run({ session = null, transcript = null, now: at = Date.now(), retryNow = false } = {}) {
   if (process.env.FLOW_AUTO_CHILD === "1" || process.env.FLOW_FEEDBACK === "off") return { skipped: "inside a flow run" };
   const cfg = autoConfig();
   if (!cfg.enabled) return { skipped: "auto-learn is off" };
@@ -292,11 +302,11 @@ export async function run({ session = null, transcript = null, now: at = Date.no
       const state = readJson("auto-state.json", {});
       const today = new Date(at).toISOString().slice(0, 10);
       const attemptsToday = readLog("auto.jsonl").filter((r) => r.cluster && r.at?.startsWith(today) && r.outcome !== "classified").length;
-      const cluster = pickCluster({ clusters: readJson("clusters.json", []), state, attemptsToday, cfg, at });
+      const cluster = pickCluster({ clusters: readJson("clusters.json", []), state, attemptsToday, cfg, at, retryNow: retryNow && !done.length });
       if (!cluster) break;
-      writeJson("auto-state.json", { ...state, [cluster.id]: { occurrences: cluster.occurrences, at: now() } });
       let result;
       try { result = await attempt(cluster, cfg); } catch (error) { result = { cluster: cluster.id, outcome: "error", reason: String(error.message).slice(0, 300) }; }
+      writeJson("auto-state.json", { ...readJson("auto-state.json", {}), [cluster.id]: { occurrences: cluster.occurrences, at: now(), outcome: result.outcome } });
       log(result);
       done.push(result);
     }
