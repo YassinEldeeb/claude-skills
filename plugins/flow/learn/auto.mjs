@@ -16,7 +16,7 @@ import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readdirSync, r
 import { homedir, tmpdir, userInfo } from "node:os";
 import { dirname, join } from "node:path";
 import { ownWords } from "./classify.mjs";
-import { calibrate, claudeBin, loadCase } from "./prove.mjs";
+import { calibrate, canConfine, claudeBin, loadCase } from "./prove.mjs";
 import { changedPaths, gh, pathProblems } from "./propose.mjs";
 import { appendLog, clean, config, enqueue, home, looksSecret, path, readJson, readLog, writeJson } from "./store.mjs";
 import { TARGETS, clusterKey, processQueue } from "./worker.mjs";
@@ -87,11 +87,14 @@ export function takeLock(name) {
         release: () => { try { if (JSON.parse(readFileSync(file, "utf8")).pid === process.pid) rmSync(file); } catch { /* gone */ } },
       };
     } catch {
+      let raw = null;
       try {
-        const held = JSON.parse(readFileSync(file, "utf8"));
+        raw = readFileSync(file, "utf8");
+        const held = JSON.parse(raw);
         if (alive(held.pid) && Date.now() - held.at < 12 * 3600_000) return null;
       } catch { /* unreadable: stale */ }
-      rmSync(file, { force: true });
+      // Take over only the stale lock we read: another process may have replaced it in between.
+      try { if (raw == null || readFileSync(file, "utf8") === raw) rmSync(file, { force: true }); else return null; } catch { /* gone */ }
     }
   }
   return null;
@@ -145,7 +148,7 @@ const rule = (tool, p) => `${tool}(//${p.replace(/^\//, "")})`;
  * tools. read/write are exact path patterns (Claude Code permission globs); ~/.claude and the feedback store are
  * denied unless `read` names something in them.
  */
-export function agent({ cwd, prompt, model, read = [], write = [], maxTurns = 60, timeoutMin = 40 }) {
+export function agent({ cwd, prompt, model, read = [], write = [], deny = [], maxTurns = 60, timeoutMin = 40 }) {
   const dir = mkdtempSync(join(tmpdir(), "flow-auto-agent-"));
   const settings = join(dir, "settings.json");
   writeFileSync(settings, JSON.stringify({ sandbox: { enabled: true, allowUnsandboxedCommands: false, network: { allowedDomains: [] } } }));
@@ -154,7 +157,7 @@ export function agent({ cwd, prompt, model, read = [], write = [], maxTurns = 60
     "-p", "--model", model, "--setting-sources", "local", "--strict-mcp-config", "--settings", settings,
     "--permission-mode", "dontAsk", "--max-turns", String(maxTurns), "--output-format", "json",
     "--allowedTools", ...["Read", "Glob", "Grep"].map((t) => rule(t, `${cwd}/**`)), ...read.map((p) => rule("Read", p)), ...write.flatMap((p) => [rule("Write", p), rule("Edit", p)]),
-    "--disallowedTools", "Bash", "WebFetch", "WebSearch", "Task", "Agent", "NotebookEdit", ...private_.flatMap((p) => ["Read", "Write", "Edit"].map((t) => rule(t, p))),
+    "--disallowedTools", "Bash", "WebFetch", "WebSearch", "Task", "Agent", "NotebookEdit", ...[...private_, ...deny].flatMap((p) => ["Read", "Glob", "Grep", "Write", "Edit"].map((t) => rule(t, p))),
   ];
   const env = { ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !SCRUB.test(k) && !/TOKEN|SECRET|KEY/.test(k))), FLOW_FEEDBACK: "off", FLOW_AUTO_CHILD: "1" };
   const run = spawnSync(claudeBin(), args, { cwd, input: prompt, encoding: "utf8", timeout: timeoutMin * 60_000, env, maxBuffer: 64 * 1024 * 1024 });
@@ -189,26 +192,69 @@ export function lastJson(text) {
 // ---------- the privacy check: nothing of the engineer's reaches a commit or a PR ----------
 
 const words = (s) => String(s ?? "").toLowerCase().split(/[^a-z0-9']+/).filter(Boolean);
-const grams = (list, n = 5) => { const out = new Set(); for (let i = 0; i + n <= list.length; i++) out.add(list.slice(i, i + n).join(" ")); return out; };
+// 5-word runs as 32-bit hashes: whole transcripts fit in memory; a collision only ever refuses more.
+const hash = (s) => { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; };
+const grams = (list, n = 5) => { const out = new Set(); for (let i = 0; i + n <= list.length; i++) out.add(hash(list.slice(i, i + n).join(" "))); return out; };
+const IDENT = /\b(?:[A-Za-z][A-Za-z0-9]*(?:[_.-][A-Za-z0-9]+)+|[a-z]+[A-Z][A-Za-z0-9]+|[A-Z][a-z]+[A-Z][A-Za-z0-9]+|[A-Z]{2,}-\d+)\b/g;
+const idents = (s) => new Set((String(s ?? "").match(IDENT) ?? []).filter((t) => t.length >= 5).map((t) => t.toLowerCase()));
+
+/** All the text of a transcript (prompts, replies, tool input and output), capped: what the analyzer could have seen. */
+export function transcriptText(file, maxBytes = 8 * 1024 * 1024) {
+  if (!file || !existsSync(file)) return "";
+  const size = statSync(file).size, text = readFileSync(file, "utf8");
+  const tail = size > maxBytes ? text.slice(-maxBytes) : text;
+  const out = [];
+  const walk = (v) => { if (typeof v === "string") out.push(v); else if (Array.isArray(v)) v.forEach(walk); else if (v && typeof v === "object") for (const k of ["text", "content", "input", "command", "result", "stdout"]) if (k in v) walk(v[k]); };
+  for (const line of tail.split("\n")) { try { walk(JSON.parse(line).message?.content); } catch { /* skip */ } }
+  return out.join("\n");
+}
+
+/** The public text a fix starts from: everything tracked at the base. Words, runs and names found there are not private. */
+export function corpusOf(repo, base) {
+  const files = git(repo, ["ls-tree", "-r", "--name-only", base]).split("\n").filter((f) => f && !/\.(png|jpg|gif|ico|lock)$/.test(f));
+  return files.map((f) => { try { return git(repo, ["show", `${base}:${f}`], { maxBuffer: 64 * 1024 * 1024 }); } catch { return ""; } }).join("\n");
+}
+
 /**
- * Problems with text bound for a public commit or PR: a run of 5+ words from the engineer's own text, a path, email,
- * URL or secret, the engineer's user name, or the name of a repo the incidents came from. [] when clean.
+ * Problems with text bound for a public commit or PR: a 5-word run from what the engineer's sessions held (prompts,
+ * replies, tool output), an identifier from them, a home path, a real email, a URL, a secret, or a private repo or
+ * user name. Runs, identifiers and names already in the public corpus (the skills repo at the base) don't count.
  */
-export function privacyProblems(texts, { sources = [], names = [] } = {}) {
-  const theirs = new Set(sources.flatMap((s) => [...grams(words(s))]));
-  const banned = [...new Set(names.map((n) => String(n ?? "").toLowerCase()).filter((n) => n.length >= 4))];
+export function privacyProblems(texts, { sources = [], names = [], corpus = "" } = {}) {
+  const publicGrams = grams(words(corpus)), publicIdents = idents(corpus), publicWords = new Set(words(corpus));
+  const theirs = new Set([...sources.flatMap((s) => [...grams(words(s))])].filter((g) => !publicGrams.has(g)));
+  const theirIdents = new Set([...sources.flatMap((s) => [...idents(s)])].filter((t) => !publicIdents.has(t)));
+  const banned = [...new Set(names.map((n) => String(n ?? "").toLowerCase()).filter((n) => n.length >= 3 && !publicWords.has(n)))];
   const problems = [];
   for (const [where, text] of texts) {
     const t = String(text ?? "");
     if (!t) continue;
     if (looksSecret(t)) problems.push(`${where}: looks like it holds a secret`);
     if (t.includes(homedir()) || /\/(Users|home)\/(?!\[user\])[^/\s"']+/.test(t)) problems.push(`${where}: holds a home path`);
-    if (/[A-Za-z0-9._%+-]+@(?!(?:[\w-]+\.)*(?:example\.(?:com|org|net)|test|invalid|localhost)\b)[A-Za-z0-9.-]+\.[A-Za-z]{2,}/.test(t)) problems.push(`${where}: holds an email address`);
-    if (/https?:\/\/(?!(?:[\w-]+\.)*example\.(?:com|org|net)\b|localhost\b|127\.0\.0\.1\b|github\.com\/[\w.-]+\/claude-skills\b)/i.test(t)) problems.push(`${where}: holds a URL`);
-    const hit = [...grams(words(t))].find((g) => theirs.has(g));
-    if (hit) problems.push(`${where}: repeats the engineer's words ("${hit.split(" ").slice(0, 2).join(" ")} …")`);
+    if (/[A-Za-z0-9._%+-]+@(?!(?:[\w-]+\.)*(?:example\.(?:com|org|net)|test|invalid|localhost)\b|github\.com\b|users\.noreply\.github\.com\b)[A-Za-z0-9.-]+\.[A-Za-z]{2,}/.test(t)) problems.push(`${where}: holds an email address`);
+    const url = (t.match(/https?:\/\/[^\s"'<>)\]]+/gi) ?? []).find((u) => !/^https?:\/\/((?:[\w-]+\.)*example\.(?:com|org|net)|localhost|127\.0\.0\.1)\b/i.test(u) && !corpus.includes(u.replace(/[.,;]+$/, "")));
+    if (url) problems.push(`${where}: holds a URL that isn't public in the repo`);
+    if ([...grams(words(t))].some((g) => theirs.has(g))) problems.push(`${where}: repeats 5+ words from the engineer's sessions`);
+    const ident = [...idents(t)].find((x) => theirIdents.has(x));
+    if (ident) problems.push(`${where}: uses an identifier from the engineer's sessions`);
     const name = banned.find((n) => new RegExp(`(^|[^a-z0-9])${n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^a-z0-9]|$)`, "i").test(t));
     if (name) problems.push(`${where}: names a private repo or user`);
+  }
+  return problems;
+}
+
+/** A SKILL.md can run code (frontmatter hooks, allowed-tools, !`cmd` lines): a fix may only change an existing skill's body text. */
+export function skillProblems(repo, base, files) {
+  const problems = [];
+  const front = (s) => { const m = /^---\n([\s\S]*?)\n---/.exec(s); return m ? m[1] : null; };
+  for (const f of files.filter((x) => /^plugins\/flow\/skills\/[^/]+\/SKILL\.md$/.test(x))) {
+    let before = null;
+    try { before = git(repo, ["show", `${base}:${f}`]); } catch { problems.push(`${f}: a new skill (a fix may only edit existing ones)`); continue; }
+    let after = "";
+    try { after = readFileSync(join(repo, f), "utf8"); } catch { problems.push(`${f}: deleted`); continue; }
+    if (front(before) !== front(after)) problems.push(`${f}: changes the frontmatter`);
+    const added = git(repo, ["diff", "--no-color", base, "--", f]).split("\n").filter((l) => l.startsWith("+") && !l.startsWith("+++"));
+    if (added.some((l) => l.includes("!`"))) problems.push(`${f}: adds a !\`command\` line`);
   }
   return problems;
 }
@@ -255,7 +301,8 @@ export function pickCluster({ clusters, state, attemptsToday, cfg, at = Date.now
 
 // ---------- the private clone ----------
 
-function git(dir, args, opts = {}) { return execFileSync("git", args, { cwd: dir, encoding: "utf8", timeout: 180_000, stdio: ["ignore", "pipe", "pipe"], ...opts }); }
+// No fsmonitor or hooks from the clone's config: nothing in it may run code when auto-learn runs git.
+function git(dir, args, opts = {}) { return execFileSync("git", ["-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", ...args], { cwd: dir, encoding: "utf8", timeout: 180_000, stdio: ["ignore", "pipe", "pipe"], ...opts }); }
 export const cloneDir = (cfg) => cfg.cloneDir ?? join(homedir(), ".cache", "flow-learn", "skills");
 /** A clean checkout of the default branch; returns the clone and the base sha (pinned: nothing can move it later). */
 export function prepareClone(cfg) {
@@ -271,7 +318,7 @@ export function prepareClone(cfg) {
 }
 
 /** Every changed path in the clone, ignored files included (an agent could hide one there). */
-const touched = (repo) => git(repo, ["status", "--porcelain", "--ignored", "--untracked-files=all"]).split("\n").filter(Boolean).map((l) => l.slice(3).replace(/^"|"$/g, ""));
+const touched = (repo) => git(repo, ["status", "--porcelain", "-z", "--no-renames", "--ignored", "--untracked-files=all"]).split("\0").filter(Boolean).map((l) => l.slice(3));
 /** Added text of the candidate: new files whole, changed files' added lines. */
 function addedText(repo, base, files) {
   return files.map((f) => {
@@ -283,7 +330,7 @@ function addedText(repo, base, files) {
 }
 
 /** Cut at a sentence end within max characters (never mid-word). */
-const cut = (s, max) => { const t = String(s).trim(); if (t.length <= max) return t; const head = t.slice(0, max); const end = Math.max(head.lastIndexOf(". "), head.lastIndexOf(".\n")); return end > max / 3 ? head.slice(0, end + 1) : `${head.slice(0, head.lastIndexOf(" "))} …`; };
+const cut = (s, max) => { const t = String(s).trim(); if (t.length <= max) return t; const head = t.slice(0, max); const end = Math.max(head.lastIndexOf(". "), head.lastIndexOf(".\n")); const space = head.lastIndexOf(" "); return end > max / 3 ? head.slice(0, end + 1) : `${space > 0 ? head.slice(0, space) : head} …`; };
 const SAFE_TEXT = (s, max = 1200) => (typeof s === "string" && s.trim() && !looksSecret(s) ? cut(s, max) : null);
 
 // ---------- one attempt ----------
@@ -294,8 +341,10 @@ export async function attempt(cluster, cfg) {
   const incidents = readLog("incidents.jsonl").filter((i) => clusterKey(i) === cluster.id);
   const transcripts = [...new Set(incidents.map((i) => i.session))].map(transcriptFor).filter(Boolean).slice(-3);
   // What must never leave the machine: the engineer's own words, and the names of their repos and account.
-  const sources = [...(cluster.localExamples ?? []).flatMap((e) => [e.correction, e.objective]), ...incidents.map((i) => i.text), ...transcripts.flatMap((t) => typedPrompts(t))].filter(Boolean);
-  const names = [...incidents.map((i) => i.repo), userInfo().username];
+  const sources = [...(cluster.localExamples ?? []).flatMap((e) => [e.correction, e.objective]), ...incidents.map((i) => i.text), ...transcripts.map((t) => transcriptText(t))].filter(Boolean);
+  const gitName = (key) => { try { return execFileSync("git", ["config", "--get", key], { encoding: "utf8" }).trim(); } catch { return ""; } };
+  const names = [...incidents.map((i) => i.repo), userInfo().username, ...gitName("user.name").split(/\s+/), gitName("user.email").split("@")[0]];
+  const corpus = corpusOf(repo, base);
   // 1. analyze: may read exactly those transcripts; writes nothing; its answer must be synthetic.
   const analysis = agent({
     cwd: repo, model: cfg.model, read: transcripts, timeoutMin: 20,
@@ -310,7 +359,7 @@ Answer with only JSON: {"synthetic": "<the failure as a generic, reproducible sc
   const a = lastJson(analysis.text) ?? {};
   const synthetic = SAFE_TEXT(a.synthetic), rootCause = SAFE_TEXT(a.rootCause, 600);
   if (!analysis.ok || !synthetic || !rootCause) return { ...record, outcome: "no-analysis", reason: analysis.ok ? "the analysis was empty or unsafe" : analysis.text.slice(0, 200) };
-  const early = privacyProblems([["synthetic", synthetic], ["root cause", rootCause]], { sources, names });
+  const early = privacyProblems([["synthetic", synthetic], ["root cause", rootCause]], { sources, names, corpus });
   if (early.length) return { ...record, outcome: "refused-private", reasons: early };
   const caseId = `auto-${cluster.id}-${Date.now().toString(36)}`.replace(/[^a-z0-9-]/g, "").slice(0, 60);
   const caseRel = `plugins/flow/learn/cases/${caseId}`, caseDir = join(repo, caseRel);
@@ -327,11 +376,13 @@ Answer with only JSON: {"case": "${caseId}"}`;
     if (!existsSync(join(caseDir, "case.json"))) return "no case.json";
     try {
       const c = loadCase(caseDir);
+      if (c.kind === "behavioral" && !canConfine()) return "UNCONFINED";
       if (c.kind === "behavioral") { const cal = await calibrate(c); if (!cal.ok) return `the scorer doesn't separate its calibration (good: ${JSON.stringify(cal.good).slice(0, 120)}; bad: ${JSON.stringify(cal.bad).slice(0, 120)})`; }
       return null;
     } catch (error) { return `the case doesn't load: ${String(error.message).slice(0, 160)}`; }
   };
   let caseProblem = await caseCheck();
+  if (caseProblem === "UNCONFINED") return { ...record, outcome: "refused-paths", reasons: ["a behavioral case runs agent-written code, and this platform has no scorer sandbox (macOS sandbox-exec)"] };
   if (caseProblem) { cases = writeCase(caseProblem); caseProblem = await caseCheck(); }
   if (caseProblem) return { ...record, outcome: "no-case", reason: caseProblem };
   const strayCase = touched(repo).filter((f) => !f.startsWith(`${caseRel}/`) && f !== `${caseRel}/`);
@@ -339,7 +390,7 @@ Answer with only JSON: {"case": "${caseId}"}`;
   // 3. fix: the smallest change, in exactly the files the loop may change.
   const fixable = [`${repo}/plugins/flow/skills/*/SKILL.md`, `${repo}/plugins/flow/templates/rules.md`, `${repo}/plugins/flow/hooks/constraint-rules.json`];
   const fix = agent({
-    cwd: repo, model: cfg.model, write: fixable, timeoutMin: 20,
+    cwd: repo, model: cfg.model, write: fixable, deny: [`${caseDir}/**`], timeoutMin: 20,
     prompt: `FLOW-AUTO-STEP: fix
 Make the smallest change to flow that prevents this failure, following plugins/flow/skills/learn/SKILL.md §4.
 The failure: ${synthetic}
@@ -354,9 +405,9 @@ Answer with only JSON: {"change": "<what you changed and why, 1-2 sentences; the
   if (!files.some((f) => !f.startsWith(`${caseRel}/`))) return { ...record, outcome: "no-fix", reason: fix.text.slice(0, 200) };
   // 4. check before anything runs: only the allowed paths changed, and nothing private is in the text or the files.
   const stray = touched(repo).filter((f) => !(f.startsWith(`${caseRel}/`) || /^plugins\/flow\/(skills\/[^/]+\/SKILL\.md|templates\/rules\.md|hooks\/constraint-rules\.json)$/.test(f)));
-  const paths = [...pathProblems(repo, base, files), ...stray.map((f) => `changed ${f}`)];
+  const paths = [...pathProblems(repo, base, files), ...skillProblems(repo, base, files), ...stray.map((f) => `changed ${f}`)];
   if (paths.length) return { ...record, outcome: "refused-paths", reasons: paths.slice(0, 5) };
-  const leaks = privacyProblems([["synthetic", synthetic], ["root cause", rootCause], ["change", change], ...addedText(repo, base, files)], { sources, names });
+  const leaks = privacyProblems([["synthetic", synthetic], ["root cause", rootCause], ["change", change], ...files.map((f) => [`path ${f}`, f]), ...addedText(repo, base, files)], { sources, names, corpus });
   if (leaks.length) return { ...record, outcome: "refused-private", reasons: leaks.slice(0, 5) };
   // 5. prove: the real harness against the pinned base. Runs on the engineer's plan.
   const results = join(path("auto"), `${caseId}.results.json`);

@@ -133,11 +133,13 @@ function sandboxFor(testCase, overlay) {
  * network and no reads of the engineer's credentials or Claude state. Elsewhere it runs as before (a stated limit).
  */
 const SANDBOX_EXEC = "/usr/bin/sandbox-exec";
+export const canConfine = () => process.platform === "darwin" && existsSync(SANDBOX_EXEC) && process.env.FLOW_SCORER_SANDBOX !== "off";
 export function confined(cmd, args) {
   if (process.platform !== "darwin" || !existsSync(SANDBOX_EXEC) || process.env.FLOW_SCORER_SANDBOX === "off") return [cmd, args];
   const h = homedir();
   const secret = [".claude", ".ssh", ".aws", ".config/gh", ".gnupg", ".netrc", "Library/Keychains", ".docker"].map((p) => `(subpath "${join(h, p)}")`).join(" ");
-  const profile = `(version 1)(allow default)(deny network*)(allow network* (remote unix-socket))(allow network* (local ip "localhost:*"))(allow network* (remote ip "localhost:*"))(deny file-read* ${secret})`;
+  // Writes only to temp dirs and /dev; no network but localhost TCP (no unix sockets: DNS and docker.sock are ways out).
+  const profile = `(version 1)(allow default)(deny network*)(allow network* (local ip "localhost:*"))(allow network* (remote ip "localhost:*"))(deny file-read* ${secret})(deny file-write*)(allow file-write* (subpath "/private/var/folders") (subpath "/private/tmp") (subpath "${tmpdir()}") (literal "/dev/null") (literal "/dev/zero") (literal "/dev/tty") (regex #"^/dev/fd/"))`;
   return [SANDBOX_EXEC, ["-p", profile, cmd, ...args]];
 }
 const SCRUBBED = () => ({ PATH: "/usr/bin:/bin:/usr/sbin:/sbin:" + dirname(process.execPath), HOME: mkdtempSync(join(tmpdir(), "flow-score-home-")), LANG: "C" });
@@ -217,7 +219,7 @@ export async function runOnce(testCase, prompt, tree, { model, maxTurns = 25 }) 
   writeFileSync(join(stub, "gh"), `#!/bin/sh\necho "$@" >> "${ghLog}"\necho "stub: gh is not available in this sandbox"\n`);
   chmodSync(join(stub, "gh"), 0o755);
   const settings = join(stub, "settings.json");
-  writeFileSync(settings, JSON.stringify({ sandbox: { enabled: true, network: { allowedDomains: [] } } }));
+  writeFileSync(settings, JSON.stringify({ sandbox: { enabled: true, allowUnsandboxedCommands: false, network: { allowedDomains: [] } } }));
   const args = [
     "-p", "--model", model, "--plugin-dir", plugin, "--setting-sources", "local", "--strict-mcp-config",
     "--settings", settings, "--permission-mode", "dontAsk", "--max-turns", String(maxTurns), "--output-format", "json",
@@ -248,11 +250,17 @@ export function withoutToolState(dir) {
 }
 
 /** spawnSync's result shape, without blocking: several runs go at once. A timeout kills the whole process group. */
+// Each run is its own process group; if this process is told to stop, the runs stop with it (no orphaned spend).
+const groups = new Set();
+let stopping = false;
+const stopAll = (signal) => { if (stopping) return; stopping = true; for (const pid of groups) { try { process.kill(-pid, "SIGKILL"); } catch { /* gone */ } } process.exit(signal === "SIGINT" ? 130 : 143); };
 function spawnAsync(cmd, args, { cwd, input, env, timeout }) {
+  if (!groups.size && !stopping) { process.once("SIGTERM", () => stopAll("SIGTERM")); process.once("SIGINT", () => stopAll("SIGINT")); }
   return new Promise((resolve) => {
     const child = spawn(cmd, args, { cwd, env, stdio: ["pipe", "pipe", "pipe"], detached: true });
+    if (child.pid) groups.add(child.pid);
     let stdout = "", stderr = "", done = false;
-    const finish = (status) => { if (done) return; done = true; clearTimeout(timer); clearTimeout(grace); resolve({ status, stdout, stderr }); };
+    const finish = (status) => { if (done) return; done = true; groups.delete(child.pid); clearTimeout(timer); clearTimeout(grace); resolve({ status, stdout, stderr }); };
     const killGroup = () => { try { process.kill(-child.pid, "SIGKILL"); } catch { try { child.kill("SIGKILL"); } catch { /* gone */ } } };
     const timer = setTimeout(() => { killGroup(); stderr += "\n[flow] timed out"; }, timeout);
     let grace = null;

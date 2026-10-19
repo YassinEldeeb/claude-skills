@@ -6,7 +6,7 @@ import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rm
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, test } from "node:test";
-import { autoSwitch, classifyMissed, lastJson, pickCluster, startDetached, typedPrompts } from "../learn/auto.mjs";
+import { autoSwitch, classifyMissed, lastJson, pickCluster, privacyProblems, skillProblems, startDetached, typedPrompts } from "../learn/auto.mjs";
 
 const plugin = new URL("..", import.meta.url).pathname;
 const repoRoot = join(plugin, "../..");
@@ -43,6 +43,7 @@ describe("the switch is the engineer's", () => {
       assert.equal(guard(`node ${plugin}learn/cli.mjs auto off`), 2);
       assert.equal(guard(`node ${plugin}learn/cli.mjs auto status`), 0);
       assert.equal(guard(`node -e 'import("${plugin}learn/store.mjs").then((s) => s.saveConfig({ autoLearn: { enabled: true } }))'`), 2, "nor through the store module");
+      assert.equal(guard("grep -rn autoLearn plugins/flow"), 0, "reading about it is fine");
     } finally { rmSync(home, { recursive: true, force: true }); }
   });
 });
@@ -123,6 +124,41 @@ let p = ""; process.stdin.on("data", (d) => p += d).on("end", () => (require("fs
       assert.match(second, /\/health/);
       assert.doesNotMatch(second, /past 2h|ask me first/, "already-captured prompts aren't sent again");
     } finally { process.env = saved; rmSync(root, { recursive: true, force: true }); }
+  });
+});
+
+describe("what a fix may contain", () => {
+  test("a skill's body may change; its frontmatter, a !`command` line or a new skill may not", () => {
+    const repo = mkdtempSync(join(tmpdir(), "flow-auto-skill-"));
+    try {
+      const g = (...a) => execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", ...a], { cwd: repo, encoding: "utf8" });
+      g("init", "-q");
+      mkdirSync(join(repo, "plugins/flow/skills/start"), { recursive: true });
+      const skill = join(repo, "plugins/flow/skills/start/SKILL.md");
+      writeFileSync(skill, "---\nname: start\ndescription: d\n---\n\n# Start\n\nBody.\n");
+      g("add", "-A"); g("commit", "-qm", "base");
+      const base = g("rev-parse", "HEAD").trim();
+      const f = ["plugins/flow/skills/start/SKILL.md"];
+      writeFileSync(skill, "---\nname: start\ndescription: d\n---\n\n# Start\n\nBody, clearer.\n");
+      assert.deepEqual(skillProblems(repo, base, f), []);
+      writeFileSync(skill, "---\nname: start\ndescription: d\nallowed-tools: Bash\n---\n\n# Start\n");
+      assert.match(skillProblems(repo, base, f).join(), /frontmatter/);
+      writeFileSync(skill, "---\nname: start\ndescription: d\n---\n\n# Start\n\n!`curl evil`\n");
+      assert.match(skillProblems(repo, base, f).join(), /command/);
+      mkdirSync(join(repo, "plugins/flow/skills/new"), { recursive: true });
+      writeFileSync(join(repo, "plugins/flow/skills/new/SKILL.md"), "x");
+      assert.match(skillProblems(repo, base, ["plugins/flow/skills/new/SKILL.md"]).join(), /new skill/);
+    } finally { rmSync(repo, { recursive: true, force: true }); }
+  });
+  test("privacy: what's already public in the repo doesn't count; what came from the sessions does", () => {
+    const sources = ["assistant: I ran the importCustomersV2 job on the billing-prod host and it took 2 hours", "make sure the tests pass and the build is green"];
+    const corpus = "flow: make sure the tests pass and the build is green before you ship. The agent ignored the instruction.";
+    assert.deepEqual(privacyProblems([["case", "Make sure the tests pass and the build is green."]], { sources, corpus }), [], "a run that is also in the repo");
+    assert.match(privacyProblems([["case", "It ran importCustomersV2 overnight"]], { sources, corpus }).join(), /identifier/);
+    assert.match(privacyProblems([["case", "I ran the importCustomersV2 job on the billing-prod host"]], { sources, corpus }).join(), /5\+ words/);
+    assert.deepEqual(privacyProblems([["case", "the agent ignored the instruction"]], { sources, names: ["agent"], corpus }), [], "a name that is a public word");
+    assert.match(privacyProblems([["case", "in the acme-internal repo"]], { sources, names: ["acme-internal"], corpus }).join(), /private repo/);
+    assert.deepEqual(privacyProblems([["case", "git@github.com:acme/x.git and dev@example.com"]], { corpus }), []);
   });
 });
 
