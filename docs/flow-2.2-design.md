@@ -23,17 +23,32 @@ A background pipeline project ran for about eleven days with several agents in p
 - **The gate and the task schema.** `.flow/tasks/<ID>/progress.md` is a plain file the gate doesn't read, so repos on the 2.0 gate need no upgrade. The scorecard lives there, not in `task.json`: the 2.0 gate rejects unknown task fields.
 - **No continuation hook.** I considered a Stop hook that sends the agent back to the next step. A baseline run showed current flow already carries a medium task from one prompt to verified, stopping only at a real blocker (no remote). The evidence didn't justify a mechanism that could keep a wrong loop running. Continuation stays an instruction, with its exits written down: the engineer says stop or asks something else, a checkpoint, a named wait, or done.
 
-## Evidence (2026-10-19, Sonnet, real plugin loading)
+## Repos with their own release policy
 
-Three behavioral cases under `plugins/flow/learn/cases/drive-*`, run with `flow-learn prove` (`claude -p --plugin-dir`), baseline `origin/master` against this branch, one run per prompt per arm, three rounds. The existing suite (`outcome-drift-paying-customers`, `overengineering-health-endpoint`, the no-merge cases) is run alongside each round.
+Some repos already authorize agents to merge (Raptor: merge when green, admin merge allowed, no second approver). flow's hooks and gate act only in repos with `.flow/config.json`, so in such a repo nothing of flow blocks those merges, and there is no flow gate to bypass. The skills now say so: without the gate, the repo's written policy (AGENTS.md / CLAUDE.md) decides approvals and merges, standing authorization counts, and 🔴 decisions still go to the human. With the gate installed, nothing merges past a red `flow` check, `--admin` included; install it only where you want human `spec@`/`ship@` approvals on high-risk work.
 
-| Case | What a pass needs | Result |
+## Evidence (2026-10-19, Sonnet, real plugin loading, synthetic repos)
+
+Every check here runs on small synthetic repos with a stand-in model client. None of it is a production measurement.
+
+**A harness defect, found late.** `pluginCopy()` dropped all of `learn/`, but every hook imports `learn/classify.mjs` or `learn/store.mjs`. In every behavioral run before the fix (2.1's included), the hooks crashed on load and Claude Code carried on without them. The copy now drops only `learn/cases` and `test/`, and `pluginSmoke` runs every declared hook before a run counts. The development rounds below ran without hooks, on both arms.
+
+**Final revision (frozen at `dba8421`, the fixed harness, both arms the same harness and scorers, 6 runs per arm per case):**
+
+| Case | master | this branch |
 |---|---|---|
-| `drive-measure-first` | A performance-sensitive high-risk job (a nightly model pass over every user's notes, 1-hour target). Before the spec approval, the planned processing runs on the real sample and the forecast comes from it. The stand-in client's cost depends on input size and publishes no formula. | **Ran the planned shape on the sample before deciding: this branch 5 of 8 runs, master 1 of 9** (counted from the transcripts). Master read the client's code and estimated, and twice labelled such a number "measured". Both arms usually saw that the plan misses the hour. The scorer missed real runs twice, when the agent tidied its spike output, so the gated verdict stayed inconclusive. The case now also records usage under `.git/`. |
-| `drive-medium-forecast` | One prompt on a medium feature ends verified (task, evidence, `verify.md`, a working cached client) without handing back a step the agent could run | **No improvement shown.** Master already does this most of the time (5 of 8). This branch passed 3 of 6 after the fix below. In the failures, one run misread the README and sized the task small, and two plain-language prompts stopped before `verify.md`. |
-| `drive-two-misses` | A task two rounds off-track: continuing changes the approach and meets the target, or raises a decision | **Cannot reproduce:** master passed every run (it switched to batch inserts), so no improvement can be shown. |
-| Existing suite | No regressions | Same on both arms in every round (behavioral 3/3 each; deterministic cases identical). |
+| `drive-measure-first`: runs the planned processing on the real sample before the spec approval, forecasts from it (labelled estimate), on a job whose obvious plan misses its 1-hour target | 0/6 | 3/6 |
+| `drive-medium-forecast`: one prompt carries a medium feature to verified, with the light challenge the gate requires | 0/6 | 2/6 |
+| `drive-first-result`: a round with an existing artifact and a result, then the work goes on to verified without asking to continue (an acceptance check for this branch; master was never told to do it) | n/a | 3/6 |
+| Suite: `drive-two-misses`, `outcome-drift-paying-customers`, `overengineering-health-endpoint` | 8/8 | 8/8 |
 
-What the rounds changed. Round 1 showed this branch folding build and verify into one step on a medium task, with no evidence and no `verify.md`. The route table now names `/flow:build`, `/flow:verify` and `/flow:ship` as skills to load and finish, and says what "done" means for medium work. A fresh-eyes review then found that medium tasks skipped the light challenge the gate requires, that the forecast was labelled "measured", two `ownWords` bypasses, and scorers that passed bad behavior. All of these are fixed. The paste bypasses and the scorers have tests; the medium light-challenge step and the continuation exits are instructions with no behavioral case yet. A second review then found that medium could wait on a spec approval it doesn't need, a quadratic `ownWords` scan, and two more close-tag bypasses. Those are fixed too, and the medium case now checks the light challenge (the rounds above ran before that check and before medium gained the challenge step).
+Reading the failures:
+- **master's medium zero** is the light challenge: master never writes it, so its medium tasks would fail its own gate. Its task and verify behavior was otherwise often fine.
+- **This branch's medium misses:** two put `capacity` inside `challenge` instead of at the top level of `task.json` (fixed in `a90049a`, see below). The plain-language prompt (no `/flow:start`) produced no flow task on either arm (0 of 4 per arm): typing `/flow:start` is still needed.
+- **Measure-first misses:** both arms often skip creating a task for the plain-language prompt. When this branch did create a task, it usually ran the sample.
 
-Limits. The samples are small (8 to 9 runs per arm on the deciding case) and come from one model on synthetic repos. The medium regression signal is within noise but not reassuring; watch it. About $10 of model spend across the rounds.
+**After the frozen run:** `a90049a` says where the capacity block goes. Confirmation, this branch only, slash prompts, 8 runs: `drive-first-result` 4/4, `drive-medium-forecast` 2/4. Every run that wrote `capacity` put it at the top level now (6 of 8). The two medium misses: one wrote no capacity block at all, and one listed no signals and built an injected provider instead of calling the README's URL. That's the agent's judgement, not the placement.
+
+**Development rounds (before the harness fix; pooled across changing revisions, so indicative only):** measure-first ran the sample in 5 of 8 runs on this branch against 1 of 9 on master (counted from transcripts); medium was within noise; two-misses didn't reproduce on master.
+
+Limits: small samples, one model, synthetic repos with a stand-in provider. The behavior on real repos and real workloads is unmeasured. About $18 of model spend across all rounds.
