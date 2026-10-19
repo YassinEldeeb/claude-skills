@@ -59,18 +59,25 @@ Plans fail on the assumption nobody ran: a throughput that turns hours into days
 
 Skip only when nothing scales and nothing depends on something you haven't touched; say so in `log`.
 
-## 6. Rounds
+## 6. Rounds: a result the engineer can inspect, early and often
 
-- **Round 1 is the walking skeleton:** the thinnest real end-to-end path (input → stored → published → used), simulated parts named, every outside dependency (other repos, flags, permissions, data access) wired and checked at its source. One builder until it works.
-- **Every round ends with something the engineer can see** and the same scorecard (at most 3 outcome numbers, absolute targets), appended to `.flow/tasks/<ID>/progress.md`:
+- **Name the first reviewable result before substantial work,** in `progress.md`: the smallest real example that shows useful progress (pick the one that exercises the suspected failure, not the easiest to pass), what the engineer will inspect (a before/after diff or output, a screenshot, a running interaction, a command to reproduce; whichever makes the behavior easiest to judge), and what success means for it. For a trivial task, the finished change is the result.
+- **Reach it before broadening.** One representative example through the real path first, as the walking skeleton: input → stored → published → used, simulated parts named, every outside dependency (other repos, flags, permissions, data access) wired and checked at its source. For example: one source, facts extracted before/after; one memory section before/after with its token difference; one representative user's published memory and a retrieval; one working interaction before every screen. One builder until it works.
+- **Short cycles, each answering one question.** Aim for the first checkpoint within about 15–30 minutes when feasible (a target, never a reason to fake progress). If it can't be reached, name the prerequisite and show the smallest evidence you have. A cycle with no inspectable improvement means a smaller next experiment or the blocker fixed, never a wider implementation.
+- **Each checkpoint appends a short round** to `.flow/tasks/<ID>/progress.md` (private examples stay in private storage; no transcripts; commits and test counts aren't progress):
 
 ```
-## Round 2: skeleton on real data (2026-10-19)
-- shows: what the engineer can now see or do (path or link)
+## Round 2: one real transcript, before/after (2026-10-19, rev 1a2b3c4)
+- goal: keep the decisions a meeting made
+- artifact: out/round2/facts-diff.md
+- result: 7 of 9 decisions kept (was 3); dates still lost; long transcripts unverified
 - scorecard: heavy user done in 14 h (target 2 h) · $3.10 per user (target $1) · 18/20 useful
-- forecast: whole cohort in 3 days; deadline Tuesday, misses
+- next: keep dates in the extraction
 - verdict: off-track
 ```
+
+- **A checkpoint is a notification, not a question.** Save it, tell the engineer in a line or two, and go on with the next authorized step. Never ask "shall I continue?", and never read silence as approval for anything outside existing authorization. Fold in feedback when it arrives; a status question or a comment on a checkpoint doesn't stop the task unless the engineer redirects or stops it.
+- Early rounds guide the build; they don't prove the feature. The task's criteria still decide when it's done.
 
 ## 7. Stop and rethink
 
@@ -98,4 +105,4 @@ Everything else is yours to decide.
 
 ## Keep going
 
-Before you end a turn, the task is at a checkpoint or 🔴 decision (one ready-to-paste ask, and you keep doing what doesn't depend on it), waiting on something outside the session (name it), or done (deployed and verified, or the PR open with the one thing blocking the rest named). Otherwise, continue. Stop at once when the engineer says stop or pause, or asks about something else; answer that instead. A later prompt about this task resumes it from `progress.md` and `flow.mjs status <ID>`.
+Before you end a turn, the task is at a checkpoint 1 or 3 or a 🔴 decision (one ready-to-paste ask, and you keep doing what doesn't depend on it), waiting on something outside the session (name it), or done (deployed and verified, or the PR open with the one thing blocking the rest named). A round checkpoint is not a stop. Otherwise, continue. Stop at once when the engineer says stop or pause; answer a question about something else, then resume the task unless told not to. A later prompt about this task resumes it from `progress.md` and `flow.mjs status <ID>`.
