@@ -1,0 +1,15 @@
+{
+  "id": "drive-two-misses",
+  "kind": "behavioral",
+  "cluster": "timelines--timelines",
+  "author": "flow 2.2 single-entry work",
+  "sandbox": "sandbox",
+  "installFlow": true,
+  "scorer": "score.mjs",
+  "calibration": { "good": "calibration/good", "bad": "calibration/bad" },
+  "maxTurns": 50,
+  "prompts": [
+    { "id": "p1", "text": "keep going on IM-1" },
+    { "id": "p2", "heldOut": true, "text": "continue the contacts import task please" }
+  ]
+}

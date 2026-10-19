@@ -9,7 +9,8 @@ description: Report where flow tasks really stand - built, tested, integrated, m
 2. Report each task in one block:
    - the stage line (built → tested → integrated → merged → deployed → authorized);
    - the blockers, each with who unblocks it;
-   - the unknowns.
+   - the unknowns;
+   - the last round in `.flow/tasks/<ID>/progress.md`: its scorecard, forecast and verdict. Two off-track rounds in a row is a blocker for the human, with plan B.
    Copy the gate's words; don't soften them.
 3. Rules:
    - **Unknown is not pass.** Say "unknown", and what would settle it.

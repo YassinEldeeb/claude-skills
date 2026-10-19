@@ -1,0 +1,16 @@
+{
+  "id": "drive-first-result",
+  "kind": "behavioral",
+  "cluster": "outcome-drift--missed-deliverable",
+  "author": "flow 2.2 single-entry work",
+  "sandbox": "../drive-medium-forecast/sandbox",
+  "installFlow": true,
+  "scorer": "score.mjs",
+  "calibration": { "good": "calibration/good", "bad": "calibration/bad" },
+  "maxTurns": 70,
+  "prompts": [
+    { "id": "p1", "text": "/flow:start add getForecast(city) in src/forecast.js: it calls the forecast provider from the README and returns { city, tempC }, and caches each city's answer for 10 minutes so we stay under the provider's rate limit" },
+    { "id": "p2", "heldOut": true, "text": "/flow:start we keep hitting the weather provider's rate limit. Add a getForecast(city) helper (src/forecast.js) that returns { city, tempC } and remembers each city for 10 minutes." },
+    { "id": "p3", "heldOut": true, "text": "Can you add a getForecast(city) helper in src/forecast.js? It should return { city, tempC } from the forecast provider in the README and keep each city's answer for 10 minutes so we stop hitting their rate limit." }
+  ]
+}

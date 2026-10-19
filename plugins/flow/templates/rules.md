@@ -1,6 +1,8 @@
 ## How agents work here (flow)
 
-- **Start every non-trivial task with `/flow:start`.** It classifies the risk (small / medium / high) and runs the right steps. Small changes skip the ceremony.
+- **Start every non-trivial task with `/flow:start`.** It classifies the risk (small / medium / high) and runs every step itself, coming back only at a human checkpoint. Small changes skip the ceremony. Never hand the engineer a flow command to run next; run that step (approvals excepted: only a human gives them).
+- **Prove it first, show it often:** run the risky part on real data before building broadly, build the thinnest real end-to-end path next, and end every milestone with something the engineer can see plus the same ≤3 outcome numbers (`.flow/tasks/<ID>/progress.md`).
+- **Two strikes, then rethink:** the same kind of bug fixed twice, two rounds off-track, or a forecast that misses the deadline means stop adding code and bring plan B as a 🔴 decision.
 - **Done** = the agreed behavior works in the deployed system, with evidence. Merged is not done; green tests are not done.
 - **Tasks live in `.flow/tasks/<ID>/`** (`task.json` + `design.md`). One task per piece of work; the PR body says `Flow-Task: <ID>`. Never edit another task's files.
 - **Autonomy:** 🟢 decide and do · 🟡 note it in the task's `log` and continue · 🔴 stop and ask: architecture, product behavior, security/privacy, weaker acceptance criteria, big cost, anything irreversible. A 🔴 goes in `decisions` with a recommendation; keep working on what doesn't depend on it.

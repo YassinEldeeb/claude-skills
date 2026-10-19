@@ -1,11 +1,12 @@
 ---
 name: orchestrate
-description: Optional unattended mode. Coordinate several builder sessions on dependent tasks for hours, without coding yourself, and integrate their work into one verified release. Use for /flow:orchestrate when work splits into several tasks.
+description: A step of /flow:start for work that splits into several tasks, once its walking skeleton works. Coordinate several builder sessions on dependent tasks for hours, without coding yourself, and integrate their work into one verified release.
+user-invocable: false
 ---
 
 # Orchestrate
 
-You coordinate; you never code. **Parallelize implementation, not unresolved architecture.**
+You coordinate; you never code. **Parallelize implementation, not unresolved architecture.** Start only after the walking skeleton (round 1) works end to end; until then one builder is faster than several.
 
 1. **Contracts first.** Before any split, one task fixes the shared interfaces and invariants: schemas, file formats, API shapes, ordering and fencing rules. It merges first; everything else `dependsOn` it.
 2. **Plan the integration:**
@@ -26,7 +27,8 @@ You coordinate; you never code. **Parallelize implementation, not unresolved arc
    - batch 🔴 calls for the human, each with a recommendation;
    - never approve anything, post an approval, merge past the gate or enable auto-merge without the human's explicit say-so.
 6. **Durable state** lives in the task files and PRs, so a disconnect or a usage limit loses nothing. Resume builders from `flow.mjs status`.
-7. **Re-integrate on change.** When a dependency's spec changes after others built on it, their integration evidence is stale: re-run the combined test before calling anything ready.
+7. **Review the integrated branch,** not only each PR: run one independent review of the combined change before calling the release ready. Pieces that pass alone can break together.
+8. **Re-integrate on change.** When a dependency's spec changes after others built on it, their integration evidence is stale: re-run the combined test before calling anything ready.
 
 Report each check-in in 3 lines, from `/flow:status`:
 - what is verified, and where;

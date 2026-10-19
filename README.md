@@ -11,18 +11,46 @@ claude plugin install flow@yassin-skills
 ```
 Then, in your repo: `/flow:install`.
 
-flow scales the rigor to the risk. A typo ships with no ceremony. A new background pipeline gets its architecture, economics and test method challenged **before** the code exists, and can't merge without evidence and a human's approval of exactly what ships.
+**One command.** In a repo with flow installed:
+
+```
+/flow:start <what you want>
+```
+
+That's the whole interface. flow sizes the risk (small / medium / high) and runs every step itself. It comes back to you only when it needs you:
+
+1. **Spec approval** (high risk only): the outcome, design, capacity forecast and safety boundaries on one screen, before code.
+2. **A decision only you can make**: a product, privacy or cost call, or a plan that won't meet your target. It brings a recommendation and keeps working on everything that doesn't depend on the answer.
+3. **Ship approval** (high risk only): what works, what's verified, what's unknown, before merge.
+
+A typo ships with no ceremony. Later prompts on the same branch pick the task up where it is: you don't type `/flow:start` again, and flow never hands you a flow command to run, except an approval only you can give.
+
+**What it tells the agent to do on the way.** These are instructions meant to catch the expensive mistakes early. They're checked only on small synthetic repos with a stand-in model client, not in production (results in `docs/flow-2.2-design.md`):
+
+- **Proves the risky part first.** Before building broadly, it runs the shape it plans to build on a real sample (real data, production's model and settings), measures time and cost, and forecasts the whole workload against your target. A plan that misses comes back as plan B, before the code exists.
+- **Shows you a real result early.** Before broad work it names the smallest real example that exercises the risky part, and what you'll inspect: a before/after, an output, a screenshot, a command. It takes that one example through the real system first (every outside dependency wired and checked), aiming for a first checkpoint in 15 to 30 minutes. One builder until that works.
+- **Keeps a trail, keeps going.** Each checkpoint appends a short round to `.flow/tasks/<ID>/progress.md` (goal, artifact, result, the same three or fewer numbers, next). It tells you in a line and carries on; it doesn't ask whether to continue.
+- **Stops and rethinks.** The same kind of bug fixed twice, two rounds off-track, or a forecast that misses the deadline means no more code until there's a better plan.
+
+**Repos with their own release policy.** In a repo without the flow gate (no `.flow/config.json`), `/flow:start` runs the same steps, and the repo's written policy (AGENTS.md / CLAUDE.md) decides approvals and merges: if it already allows agents to merge when green, or to admin-merge, flow doesn't ask again. Install the gate only where you want human `spec@`/`ship@` approvals on high-risk work; with the gate installed, nothing merges past a red `flow` check and agents never use `--admin`.
+
+Other commands, when you want them:
 
 | Command | What it does |
 |---|---|
-| `/flow:start <goal>` | **The entry point.** Classifies the risk (small / medium / high) and runs the right steps in order, stopping only at the human checkpoints |
-| `/flow:challenge` | Production evidence, the 7 design questions, alternatives, capacity and cost ("could we drop 80% of this?"), an independent attack |
-| `/flow:build` | Builds to failing tests inside the approved spec |
-| `/flow:verify` | Independent check of behavior, safety invariants, integration and eval validity |
-| `/flow:ship` | PR with evidence, gate green, merge, deploy through the pipeline, verify live |
-| `/flow:status` | Where each task really is: built → tested → integrated → merged → deployed → authorized |
-| `/flow:orchestrate` | Optional: several builders on dependent tasks, contracts first, one verified release |
+| `/flow:status` | Where each task really is: built → tested → integrated → merged → deployed → authorized, plus the last round's scorecard |
 | `/flow:install` | Installs or upgrades flow in a repo (also migrates flow 1.x) |
+| `/flow:learn` | Turns a recurring correction into a proven skill improvement (explicit only) |
+
+Under the hood, `/flow:start` runs these steps itself (they don't appear in the `/` menu):
+
+| Step | What it does |
+|---|---|
+| `challenge` | Production evidence, a measured run of the risky part, the 7 design questions, alternatives, capacity and cost ("could we drop 80% of this?"), an independent attack |
+| `build` | The walking skeleton first, then failing tests inside the approved spec |
+| `verify` | Independent check of behavior, safety invariants, integration and eval validity |
+| `ship` | PR with evidence, gate green, merge, deploy through the pipeline, verify live |
+| `orchestrate` | Several builders on dependent tasks, after the skeleton works: contracts first, one verified release |
 
 ### How it works
 
@@ -135,7 +163,7 @@ Explicit corrections like the examples above are caught; implicit ones ("no, use
 - Session constraints ("don't merge") are enforced by the Bash guard on a best-effort basis; GitHub's required checks remain the hard layer.
 - **No constraint rules ship yet.** The engine is there, but rules arrive only as proven improvements. The demo's no-merge rule handled every command in five cases, then missed one phrasing in its fourth unseen round, so the gate rejected it ([results](docs/demo/flow-2.1/RESULTS.md)).
 - Behavioral evals need spend approval, recorded from your own prompt ("approve spend up to $20"); the hooks refuse `--approve-spend` without it.
-- The demo's two instruction changes (outcome drift, overengineering) were evaluated on Opus through real plugin loading: the current flow already passed every run (9/9 each), so the gate returned `cannot-reproduce` and neither change was promoted. No regressions ([behavioral results](docs/demo/flow-2.1/BEHAVIORAL.md)).
+- The demo's two instruction changes (outcome drift, overengineering) were evaluated on Opus through real plugin loading (correction, flow 2.2: in those runs the plugin copy lacked `learn/`, so the hooks failed to load and the runs measured skills without hooks; see `docs/flow-2.2-design.md`): the current flow already passed every run (9/9 each), so the gate returned `cannot-reproduce` and neither change was promoted. No regressions ([behavioral results](docs/demo/flow-2.1/BEHAVIORAL.md)).
 
 ```bash
 node plugins/flow/learn/cli.mjs report            # from a checkout; an installed plugin's CLI is in ~/.claude/plugins/cache/…/flow/<version>/learn/cli.mjs

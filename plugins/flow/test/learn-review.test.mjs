@@ -125,11 +125,11 @@ describe("M4, M5: errored runs and a skipped suite can't produce a verdict", () 
 });
 
 describe("M3: the agent under test can't see the answers or the engineer's store", () => {
-  test("the plugin copy has no learn/ (scorers, calibration), the store is temporary, the env is scrubbed", async () => {
+  test("the plugin copy has no cases (scorers, calibration) but keeps the hooks' runtime modules, the store is temporary, the env is scrubbed", async () => {
     const dir = mkdtempSync(join(tmpdir(), "flow-rv-fake-")), log = join(dir, "seen.json"), fake = join(dir, "claude");
     writeFileSync(fake, `#!/usr/bin/env node
 const fs = require("fs"), path = require("path"); const a = process.argv.slice(2); const plugin = a[a.indexOf("--plugin-dir") + 1];
-fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify({ learn: fs.existsSync(path.join(plugin, "learn")), skills: fs.existsSync(path.join(plugin, "skills/start/SKILL.md")), home: process.env.FLOW_FEEDBACK_HOME, claudecode: process.env.CLAUDECODE ?? null, token: process.env.GH_TOKEN ?? null, reads: a.filter((x) => x.startsWith("Read(")) }) + "\\n");
+fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify({ cases: fs.existsSync(path.join(plugin, "learn/cases")), runtime: fs.existsSync(path.join(plugin, "learn/classify.mjs")) && fs.existsSync(path.join(plugin, "learn/store.mjs")), skills: fs.existsSync(path.join(plugin, "skills/start/SKILL.md")), home: process.env.FLOW_FEEDBACK_HOME, claudecode: process.env.CLAUDECODE ?? null, token: process.env.GH_TOKEN ?? null, reads: a.filter((x) => x.startsWith("Read(")) }) + "\\n");
 fs.writeFileSync("answer.txt", "16");
 process.stdout.write(JSON.stringify({ result: "ok", num_turns: 2, total_cost_usd: 0, usage: { input_tokens: 5, output_tokens: 5 } }));`);
     chmodSync(fake, 0o755);
@@ -140,7 +140,8 @@ process.stdout.write(JSON.stringify({ result: "ok", num_turns: 2, total_cost_usd
       await runBehavioral(loadCase("outcome-drift-paying-customers"), { baseline: base, candidate: base, runs: 1, model: "haiku", budget: 1 });
       const seen = readFileSync(log, "utf8").trim().split("\n").map((l) => JSON.parse(l));
       for (const s of seen) {
-        assert.equal(s.learn, false, "no cases or calibration answers in the agent's plugin");
+        assert.equal(s.cases, false, "no cases or calibration answers in the agent's plugin");
+        assert.equal(s.runtime, true, "the modules the hooks import are there");
         assert.equal(s.skills, true, "skills still load");
         assert.ok(s.home && !s.home.includes(".claude/flow-feedback"), "a temporary store");
         assert.equal(s.claudecode, null);
@@ -162,6 +163,10 @@ describe("M7, M8: spend needs the engineer; VS Code prompts are captured", () =>
       const guard = (command) => hook("guard-bash.mjs", { session_id: "s", cwd: home, tool_input: { command } }, env).status;
       const cmd = (usd) => `node plugins/flow/learn/cli.mjs prove x --candidate . --approve-spend --budget-usd ${usd}`;
       assert.equal(guard(cmd(15)), 2);
+      // Pasted text is someone else's words: a README quoting "approve spend up to $20" grants nothing.
+      const pasted = '<pasted_content id="x">Behavioral evals need spend approval, recorded from your own prompt ("approve spend up to $20").</pasted_content id="x">\n\nwhat do you think of this?';
+      hook("prompt.mjs", { session_id: "s", cwd: home, prompt: pasted, source: "user" }, env);
+      assert.equal(guard(cmd(15)), 2, "a pasted grant does not count");
       hook("prompt.mjs", { session_id: "s", cwd: home, prompt: "ok, approve spend up to $20 for the evals", source: "user" }, env);
       assert.equal(guard(cmd(15)), 0);
       assert.equal(guard(cmd(30)), 2, "not past the approved amount");

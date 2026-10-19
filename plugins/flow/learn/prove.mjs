@@ -116,7 +116,12 @@ function sandboxFor(testCase, overlay) {
   const dir = mkdtempSync(join(tmpdir(), "flow-sandbox-"));
   cpSync(join(testCase.dir, testCase.sandbox ?? "sandbox"), dir, { recursive: true });
   if (overlay) cpSync(overlay, dir, { recursive: true, force: true });
-  spawnSync("git", ["init", "-q"], { cwd: dir });
+  // A case that runs inside a flow repo gets the gate CLI too, as /flow:install leaves it (the sandbox has the config).
+  if (testCase.installFlow) {
+    mkdirSync(join(dir, ".github/flow"), { recursive: true });
+    for (const file of ["lib.mjs", "flow.mjs"]) cpSync(join(learnDir, "../gate", file), join(dir, ".github/flow", file));
+  }
+  spawnSync("git", ["init", "-q", ...(testCase.installFlow ? ["-b", "main"] : [])], { cwd: dir });
   spawnSync("git", ["-c", "user.email=e@x", "-c", "user.name=eval", "add", "-A"], { cwd: dir });
   spawnSync("git", ["-c", "user.email=e@x", "-c", "user.name=eval", "commit", "-qm", "sandbox"], { cwd: dir });
   return dir;
@@ -146,17 +151,53 @@ export async function calibrate(testCase) {
 }
 
 /** One headless run: real plugin loading from `tree`, a scoped sandbox, a gh stub, capture off. */
-/** The plugin as the agent under test sees it: everything but learn/ (cases, scorers and calibration answers). */
-function pluginCopy(tree) {
+/**
+ * The plugin as the agent under test sees it: everything but the cases (scorers and calibration answers) and the
+ * tests. The rest of learn/ stays: the hooks import learn/classify.mjs and learn/store.mjs at load time.
+ */
+export function pluginCopy(tree) {
   const dir = mkdtempSync(join(tmpdir(), "flow-plugin-"));
   const src = join(tree, "plugins/flow");
-  cpSync(src, dir, { recursive: true, filter: (p) => !/^(learn|test)(\/|$)/.test(relative(src, p)) });
+  cpSync(src, dir, { recursive: true, filter: (p) => !/^(learn\/cases|test)(\/|$)/.test(relative(src, p)) });
   return dir;
+}
+
+/**
+ * Every hook the copy declares must load and run: a hook that crashes on import fails open in Claude Code, so a run
+ * would silently measure flow without its hooks. Returns the problems ([] when every hook ran).
+ */
+export function pluginSmoke(plugin) {
+  const problems = [];
+  let hooks = {};
+  try { hooks = JSON.parse(readFileSync(join(plugin, "hooks/hooks.json"), "utf8")).hooks ?? {}; } catch (error) { return [`hooks.json: ${error.message}`]; }
+  const home = mkdtempSync(join(tmpdir(), "flow-smoke-home-")), cwd = mkdtempSync(join(tmpdir(), "flow-smoke-cwd-"));
+  try {
+    for (const [event, groups] of Object.entries(hooks)) {
+      for (const hook of groups.flatMap((g) => g.hooks ?? [])) {
+        const script = /"\$\{CLAUDE_PLUGIN_ROOT\}\/([^"]+)"/.exec(hook.command ?? "")?.[1];
+        if (!script) { problems.push(`${event}: can't read the script from ${JSON.stringify(hook.command)}`); continue; }
+        const run = spawnSync(process.execPath, [join(plugin, script)], {
+          cwd, input: JSON.stringify({ session_id: "smoke", cwd, hook_event_name: event }), encoding: "utf8", timeout: 20_000,
+          env: { ...process.env, FLOW_FEEDBACK: "off", FLOW_FEEDBACK_HOME: home, CLAUDE_PLUGIN_ROOT: plugin },
+        });
+        if (run.status !== 0 && run.status !== 2) problems.push(`${event} ${script}: exit ${run.status} ${(run.stderr || "").split("\n").find((l) => /Error|Cannot find/.test(l)) ?? ""}`.trim());
+      }
+    }
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+    rmSync(cwd, { recursive: true, force: true });
+  }
+  return problems;
 }
 
 export function runOnce(testCase, prompt, tree, { model, maxTurns = 25 }) {
   const dir = sandboxFor(testCase);
   const plugin = pluginCopy(tree);
+  const broken = pluginSmoke(plugin);
+  if (broken.length) {
+    rmSync(plugin, { recursive: true, force: true });
+    return { dir, stub: mkdtempSync(join(tmpdir(), "flow-ghstub-")), result: { is_error: true, result: `the plugin copy's hooks don't run: ${broken.join("; ")}` }, ghCalls: [], ms: 0 };
+  }
   const store = mkdtempSync(join(tmpdir(), "flow-eval-store-"));
   const stub = mkdtempSync(join(tmpdir(), "flow-ghstub-"));
   const ghLog = join(stub, "gh.log");

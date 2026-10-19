@@ -1,6 +1,7 @@
 ---
 name: verify
-description: Independent, adversarial verification of a flow task's behavior before it ships - evidence, safety invariants, integration and eval validity. Use for /flow:verify, before opening or merging a medium or high PR.
+description: A step of /flow:start (run it from there; the engineer doesn't call it). Independent, adversarial verification of a flow task's behavior before it ships - evidence, safety invariants, integration and eval validity.
+user-invocable: false
 ---
 
 # Verify
@@ -29,6 +30,9 @@ An eval can't count as evidence until its scorer is shown to be right.
 - **Gold set:** known-good and known-bad cases (at least `config.minGold`), on the protected branch, not written or changed by this PR. The scorer must classify them correctly.
 - **Attribute every failure:** product defect (extraction, persistence, retrieval, agent behavior), eval defect (scorer, probe or fixture), safety failure, or unknown. Record the counts in `task.evals.results` with `runs` (at least `config.minEvalRuns`) and the baseline (same model and config).
 - Sample the ambiguous failures and read them; don't trust a regex or a single judge on a disputed case.
+- **Measure the noise first:** run the baseline twice. A difference smaller than that is not a result.
+- **Measure like production:** the eval uses production's model, data shape, dates and settings, or it's labelled as a different setup and decides nothing.
+- **Keep it small.** A fixed set that answers the question beats a growing harness; if reading 20 outputs answers it, read them.
 - Quality failures inform; they don't block a small internal canary. Unresolved safety failures block. Unknowns block a critical eval.
 
 ## 4. Evidence, not claims
@@ -37,7 +41,7 @@ Re-run the tests. Read CI's logs for the head commit. Don't accept "it passed lo
 
 ## 5. Fix and re-verify
 
-Fix real findings, then verify again until nothing actionable remains. Skip nits.
+Fix real findings, then verify again until nothing actionable remains, at most 3 passes before a 🔴 decision. Skip nits. When a pass finds the same kind of problem as the last one, fix the kind (every caller, every case), not the instance, and ask whether the operation that causes it can go. On `verdict: pass`, load `/flow:ship` yourself; on `blocked`, raise what blocks it as a 🔴 decision.
 
 ## Output
 

@@ -41,14 +41,14 @@ try {
     process.exit(0);
   }
   const branch = currentBranch(root);
-  const lines = [`[flow ${FLOW_VERSION}] This repo uses flow: start any non-trivial task with /flow:start, which classifies the risk (small/medium/high) and routes it. Rules: CLAUDE.md / AGENTS.md.`];
+  const lines = [`[flow ${FLOW_VERSION}] This repo uses flow: start any non-trivial task with /flow:start, which classifies the risk (small/medium/high) and runs every step itself. Rules: CLAUDE.md / AGENTS.md.`];
   const mine = branchTasks(flow, branch);
   for (const { id, task, hash, approved } of mine) {
     const open = (task.decisions ?? []).filter((d) => !substantive(d.chosen)).map((d) => d.id);
     const held = (flow.config.approvalBeforeBuild ?? ["high"]).includes(task.tier) && !approved;
     lines.push(`[flow] Task ${id} (${task.tier}) "${task.title}" is on this branch.${held
       ? ` Its spec is not approved: code edits are held until an approver posts \`${approveLine(id, "spec", hash)}\`${task.pr ? ` on PR #${task.pr}` : " on its draft PR"} and you run \`node .github/flow/flow.mjs sync ${id}\`.`
-      : ""}${open.length ? ` Open 🔴 decisions: ${open.join(", ")}.` : ""} State lives in .flow/tasks/${id}/; check it with \`node .github/flow/flow.mjs status ${id}\`.`);
+      : ""}${open.length ? ` Open 🔴 decisions: ${open.join(", ")}.` : ""} State lives in .flow/tasks/${id}/ (progress.md has the rounds); check it with \`node .github/flow/flow.mjs status ${id}\`. When the engineer's request is about this task, continue from its next step yourself.`);
   }
   if (!mine.length) lines.push("[flow] No task on this branch: fine for a small change; for medium or high work run /flow:start before editing code.");
   const repoLib = join(root, ".github/flow/lib.mjs");

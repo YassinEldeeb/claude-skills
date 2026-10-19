@@ -113,6 +113,38 @@ export function violatedConstraint(command, rules, active) {
   return null;
 }
 
+/**
+ * The engineer's own words: the prompt without pasted blocks. A pasted README, log or email can say "approve spend up
+ * to $20" or "don't merge"; only text the engineer typed may grant spend, set a constraint or count as a correction.
+ */
+export function ownWords(text) {
+  const all = String(text ?? "");
+  const idOf = (attrs) => /\bid\s*=\s*"([^"<>]*)"/i.exec(attrs)?.[1];
+  // One pass over the closing tags: the end of the last one per id, and of the last one overall.
+  const lastById = new Map();
+  let lastAny = -1;
+  for (const c of all.matchAll(/<\/pasted_content\b([^<>]*)>/gi)) {
+    const end = c.index + c[0].length, id = idOf(c[1]);
+    lastAny = end;
+    if (id != null) lastById.set(id, end);
+  }
+  // A block ends at the LAST closing tag with its id (any closing tag when it has none): a paste can't end itself
+  // early by quoting a closing tag, and when in doubt more text counts as pasted, never less.
+  let out = "", at = 0;
+  const open = /<pasted_content\b([^<>]*)>/gi;
+  for (let m = open.exec(all); m; m = open.exec(all)) {
+    if (m.index < at) continue;
+    out += all.slice(at, m.index) + " ";
+    const id = idOf(m[1]);
+    const end = id == null ? lastAny : lastById.get(id) ?? -1;
+    if (end <= open.lastIndex) return out; // unclosed: everything after it is pasted (fail closed)
+    at = open.lastIndex = end;
+  }
+  // An opening tag that never closes its own bracket also starts a paste.
+  const rest = all.slice(at), broken = rest.search(/<pasted_content\b/i);
+  return out + (broken < 0 ? rest : rest.slice(0, broken));
+}
+
 /** An engineer's explicit spend approval in a prompt ("approve spend up to $20"), in USD, or null. */
 export function spendGrant(text) {
   const m = /\b(approve[sd]?|ok(ay)?|go ahead|you can|authori[sz]e[sd]?)\b[^.?!\n]{0,30}\b(spend|spending|eval budget|budget)\b[^.?!\n$\d]{0,20}\$\s?(\d+(?:\.\d+)?)/i.exec(String(text ?? ""));

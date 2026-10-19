@@ -6,7 +6,7 @@ import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rm
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, test } from "node:test";
-import { calibrate, diffInterval, estimate, graderCalibrated, judge, listCases, loadCase, runBehavioral, runDeterministic, sizeGrowth, wilson } from "../learn/prove.mjs";
+import { calibrate, diffInterval, estimate, graderCalibrated, judge, listCases, loadCase, pluginCopy, pluginSmoke, runBehavioral, runDeterministic, sizeGrowth, wilson } from "../learn/prove.mjs";
 import { ghArgsAllowed, prBody, propose, refusedPaths, rollback } from "../learn/propose.mjs";
 
 const plugin = new URL("..", import.meta.url).pathname;
@@ -107,6 +107,20 @@ describe("deterministic tier: real hook scripts, baseline vs candidate", () => {
   test("an unchanged candidate is not an improvement", () => {
     const t = trees(() => {});
     try { assert.notEqual(judge({ target: runDeterministic(loadCase("no-merge-constraint"), { baseline: t.baseline, candidate: t.candidate }) }).verdict, "enforced"); } finally { rmSync(t.root, { recursive: true, force: true }); }
+  });
+});
+
+describe("the plugin copy a behavioral run loads", () => {
+  test("keeps every module the hooks import, and every hook loads and runs", () => {
+    const copy = pluginCopy(repoRoot);
+    try {
+      assert.ok(existsSync(join(copy, "learn/classify.mjs")) && existsSync(join(copy, "learn/store.mjs")), "runtime modules are copied");
+      assert.ok(!existsSync(join(copy, "learn/cases")), "cases (scorers, calibration answers) are not");
+      assert.deepEqual(pluginSmoke(copy), []);
+      // The smoke check catches the old copy, which dropped learn/ and left every hook failing on import.
+      rmSync(join(copy, "learn"), { recursive: true, force: true });
+      assert.ok(pluginSmoke(copy).some((p) => /ERR_MODULE_NOT_FOUND|Cannot find/.test(p)));
+    } finally { rmSync(copy, { recursive: true, force: true }); }
   });
 });
 
