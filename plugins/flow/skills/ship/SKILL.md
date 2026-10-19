@@ -1,6 +1,7 @@
 ---
 name: ship
-description: Open the PR with evidence, get the flow gate and CI green, merge, deploy through the normal pipeline and verify the result live. Use for /flow:ship.
+description: A step of /flow:start (run it from there; the engineer doesn't call it). Open the PR with evidence, get the flow gate and CI green, merge, deploy through the normal pipeline and verify the result live.
+user-invocable: false
 ---
 
 # Ship

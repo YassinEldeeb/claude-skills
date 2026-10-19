@@ -5,7 +5,7 @@
 // Fails open: any error lets the prompt through untouched.
 import { closeSync, existsSync, openSync, readSync, statSync } from "node:fs";
 import { performance } from "node:perf_hooks";
-import { classifyPrompt, constraintChanges, isAutomated, spendGrant } from "../learn/classify.mjs";
+import { classifyPrompt, constraintChanges, isAutomated, ownWords, spendGrant } from "../learn/classify.mjs";
 import { appendLog, captureAllowed, clean, enqueue, loadSession, safe, saveSession } from "../learn/store.mjs";
 import { PLUGIN_VERSION, constraintRules, describeConstraints, repoFlowConfig, repoOf, typedByEngineer } from "./capture.mjs";
 
@@ -44,14 +44,16 @@ try {
   const system = safe(() => contextWarning(input.transcript_path), null);
   const context = [];
   // No prompt text, nothing to record (and nothing to note or count).
-  const human = typeof input.prompt === "string" && input.prompt.trim() !== "" && typedByEngineer(input) && !isAutomated(input.prompt);
+  // Pasted blocks are someone else's words: they never grant spend, set constraints or count as corrections.
+  const own = typeof input.prompt === "string" ? ownWords(input.prompt) : "";
+  const human = own.trim() !== "" && typedByEngineer(input) && !isAutomated(own);
 
   if (human) {
     safe(() => {
       const rules = constraintRules();
       const session = loadSession(input.session_id);
       const active = new Set(session.constraints ?? []);
-      const { start, release } = constraintChanges(input.prompt, rules);
+      const { start, release } = constraintChanges(own, rules);
       for (const id of start) active.add(id);
       for (const id of release) active.delete(id);
       if (start.length || release.length) {
@@ -60,7 +62,7 @@ try {
         if (start.length) context.push(`[flow] Constraint noted for this session: ${describeConstraints(start, rules).join("; ")}. Hooks refuse it until the engineer lifts it.`);
         if (release.length) context.push(`[flow] Constraint lifted by the engineer: ${describeConstraints(release, rules).join("; ")}.`);
       }
-      const grant = spendGrant(input.prompt);
+      const grant = spendGrant(own);
       if (grant != null) {
         session.spendApprovedUsd = grant;
         context.push(`[flow] The engineer approved up to $${grant} of eval spend this session.`);
@@ -68,13 +70,13 @@ try {
       const { root, name } = repoOf(input.cwd || process.cwd());
       if (captureAllowed(repoFlowConfig(root), name)) {
         session.prompts = (session.prompts ?? 0) + 1;
-        session.objective ??= clean(input.prompt, 200);
-        const verdict = classifyPrompt(input.prompt);
+        session.objective ??= clean(own, 200);
+        const verdict = classifyPrompt(own);
         if (verdict && verdict.kind !== "noise") {
           enqueue({
             type: "prompt", at: new Date().toISOString(), session: input.session_id, repo: name,
             kind: verdict.kind, category: verdict.category ?? null, keys: verdict.keys ?? [],
-            text: verdict.kind === "positive" ? null : clean(input.prompt, 300),
+            text: verdict.kind === "positive" ? null : clean(own, 300),
             objective: session.objective, promptIndex: session.prompts,
             model: session.model ?? null, version: PLUGIN_VERSION,
           });

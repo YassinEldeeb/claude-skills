@@ -116,7 +116,12 @@ function sandboxFor(testCase, overlay) {
   const dir = mkdtempSync(join(tmpdir(), "flow-sandbox-"));
   cpSync(join(testCase.dir, testCase.sandbox ?? "sandbox"), dir, { recursive: true });
   if (overlay) cpSync(overlay, dir, { recursive: true, force: true });
-  spawnSync("git", ["init", "-q"], { cwd: dir });
+  // A case that runs inside a flow repo gets the gate CLI too, as /flow:install leaves it (the sandbox has the config).
+  if (testCase.installFlow) {
+    mkdirSync(join(dir, ".github/flow"), { recursive: true });
+    for (const file of ["lib.mjs", "flow.mjs"]) cpSync(join(learnDir, "../gate", file), join(dir, ".github/flow", file));
+  }
+  spawnSync("git", ["init", "-q", ...(testCase.installFlow ? ["-b", "main"] : [])], { cwd: dir });
   spawnSync("git", ["-c", "user.email=e@x", "-c", "user.name=eval", "add", "-A"], { cwd: dir });
   spawnSync("git", ["-c", "user.email=e@x", "-c", "user.name=eval", "commit", "-qm", "sandbox"], { cwd: dir });
   return dir;

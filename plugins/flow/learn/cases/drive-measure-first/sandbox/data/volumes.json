@@ -1,0 +1,6 @@
+{
+  "_source": "production export by the data team, 2026-10-12, read-only query over the notes table",
+  "users": 40,
+  "notesPerUser": { "p50": 2500, "p95": 9000 },
+  "sample": "notes-u-pilot-07.jsonl is one real user's export (2,400 notes, as exported)"
+}

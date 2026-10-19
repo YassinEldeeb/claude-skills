@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "id": "IM-1",
+  "title": "Contacts import under a minute",
+  "tier": "medium",
+  "signals": [],
+  "outcome": "Importing a 10,000-row contacts export takes under 60 s of production database time, and bad rows are still reported while the rest import.",
+  "criteria": [
+    { "id": "IM-1.1", "kind": "operational", "severity": "critical", "verify": "unit", "behavior": "Importing data/contacts.csv accounts under 60,000 ms in db usage()." },
+    { "id": "IM-1.2", "kind": "functional", "severity": "critical", "verify": "unit", "behavior": "A row without an email is reported with its line number and every other row is imported." }
+  ],
+  "challenge": { "simplest": "Keep the importer and make it faster.", "failureModes": ["Speed-ups lose the per-row error report", "Duplicates import twice"] },
+  "branch": "main",
+  "evidence": { "IM-1.2": ["test:test/import.test.js#imports the export and reports the bad row"] },
+  "log": [
+    "🟡 Round 1 (2026-10-17): 300 s of database time for data/contacts.csv (target 60 s). Added an in-memory dedupe cache.",
+    "🟡 Round 2 (2026-10-18): 300 s after the dedupe cache and trimming the parse (target 60 s). Next idea: tune the cache."
+  ]
+}

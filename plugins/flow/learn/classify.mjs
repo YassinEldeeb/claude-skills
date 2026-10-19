@@ -114,6 +114,12 @@ export function violatedConstraint(command, rules, active) {
 }
 
 /** An engineer's explicit spend approval in a prompt ("approve spend up to $20"), in USD, or null. */
+/**
+ * The engineer's own words: the prompt without pasted blocks. A pasted README, log or email can say "approve spend up
+ * to $20" or "don't merge"; only text the engineer typed may grant spend, set a constraint or count as a correction.
+ */
+export const ownWords = (text) => String(text ?? "").replace(/<pasted_content\b[^>]*>[\s\S]*?<\/pasted_content\b[^>]*>/gi, " ");
+
 export function spendGrant(text) {
   const m = /\b(approve[sd]?|ok(ay)?|go ahead|you can|authori[sz]e[sd]?)\b[^.?!\n]{0,30}\b(spend|spending|eval budget|budget)\b[^.?!\n$\d]{0,20}\$\s?(\d+(?:\.\d+)?)/i.exec(String(text ?? ""));
   return m && !isAutomated(text) ? Number(m[4]) : null;

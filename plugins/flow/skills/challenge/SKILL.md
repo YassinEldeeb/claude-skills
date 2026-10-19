@@ -1,6 +1,7 @@
 ---
 name: challenge
-description: Attack a high-risk design before any code is written - production evidence, alternatives, capacity and cost, failure modes, assumptions - with an independent reviewer. Use for /flow:challenge, and from /flow:start for every high-risk task (a light version for medium).
+description: A step of /flow:start (run it from there; the engineer doesn't call it). Attack a high-risk design before any code is written - production evidence, a measured run of the risky part, alternatives, capacity and cost, failure modes, assumptions - with an independent reviewer. A light version for medium.
+user-invocable: false
 ---
 
 # Challenge
@@ -35,7 +36,8 @@ Medium work answers only `simplest` and 2 `failureModes`.
   - each number with `source: measured` (plus `ref` and `at`) or `estimate` (plus `basis`);
   - high work needs at least one measured workload number.
 - Answer `cut80` with numbers: **could we drop 80% of this processing and keep most of the user value?** For example: recent-first instead of full history, reuse what's already saved, defer the rest.
-- When one assumption decides the design, build a small measured spike before the approval, not after.
+- **Measure the deciding assumption before the approval, not after** (`/flow:start` §5). Run the shape you plan to build on a real sample, with production's model and settings, and forecast the whole workload from it, the heaviest real case included. A design whose forecast misses the target is not presented as the choice: the cheaper or faster alternative is.
+- Prefer the path that already exists. A new engine, writer or pipeline beside an existing one needs a measured reason.
 
 ## 4. Independent attack
 
@@ -55,8 +57,8 @@ Medium work answers only `simplest` and 2 `failureModes`.
 Write `design.md` (the design in a page) and give the human one screen:
 - the outcome;
 - the chosen design against the alternatives (cost, latency, what's dropped);
-- the capacity numbers with their sources;
+- the capacity numbers with their sources, and the forecast for the whole workload against the target;
 - the unverified assumptions and what they block;
 - the safety invariants and how each will be proven.
 
-Then open a draft PR containing only the spec. The gate's PR comment shows the `spec@` line to approve. Stop until the human approves.
+Then open a draft PR containing only the spec. The gate's PR comment shows the `spec@` line to approve. Ask for it with that line, then keep doing what doesn't need code (the spike, test plans, fixtures). Once it's approved, continue with `flow.mjs sync` and the build yourself.
