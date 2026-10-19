@@ -107,7 +107,7 @@ A candidate is never judged by the test it was written against alone.
 | Tier | When | Evidence |
 |---|---|---|
 | Deterministic | Enforcement and mechanical cases | The real hook script from the baseline tree and from the candidate tree, on every fixture (blocked, allowed, bypass attempts). No statistics needed. |
-| Behavioral | Instruction changes | `claude -p --plugin-dir <tree>/plugins/flow`: real skill loading and triggering, with capture off (`FLOW_FEEDBACK=off`; the guards still run, as in real use). The prompts are typed as an engineer would. The sandbox is path-scoped, has no network beyond the API, and has a `gh` stub. The model is `--model`, else `eval.model` in the config, else sonnet; use the incident's model (in the dossier) to reproduce faithfully. N runs per arm per phrasing (default 5). |
+| Behavioral | Instruction changes | `claude -p --plugin-dir <tree>/plugins/flow`: real skill loading and triggering, with capture off (`FLOW_FEEDBACK=off`; the guards were meant to run as in real use, but until flow 2.2 the copy lacked `learn/` and every hook failed to load: see `flow-2.2-design.md`). The prompts are typed as an engineer would. The sandbox is path-scoped, has no network beyond the API, and has a `gh` stub. The model is `--model`, else `eval.model` in the config, else sonnet; use the incident's model (in the dossier) to reproduce faithfully. N runs per arm per phrasing (default 5). |
 
 The gate requires all of these:
 1. **Reproduction:** the baseline fails the target case in ≥50% of runs. Otherwise the result is "cannot reproduce", unverified and review-only.

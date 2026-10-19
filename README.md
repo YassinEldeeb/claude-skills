@@ -32,7 +32,7 @@ A typo ships with no ceremony. Later prompts on the same branch pick the task up
 - **Keeps a trail, keeps going.** Each checkpoint appends a short round to `.flow/tasks/<ID>/progress.md` (goal, artifact, result, the same three or fewer numbers, next). It tells you in a line and carries on; it doesn't ask whether to continue.
 - **Stops and rethinks.** The same kind of bug fixed twice, two rounds off-track, or a forecast that misses the deadline means no more code until there's a better plan.
 
-**Repos with their own release policy.** In a repo without the flow gate (no `.flow/config.json`), `/flow:start` runs the same steps, and the repo's written policy (AGENTS.md / CLAUDE.md) decides approvals and merges: if it already allows agents to merge when green, or to admin-merge, flow doesn't ask again. Install the gate only where you want human `spec@`/`ship@` approvals on high-risk work; with the gate installed, nothing merges past a red `flow` check, `--admin` included.
+**Repos with their own release policy.** In a repo without the flow gate (no `.flow/config.json`), `/flow:start` runs the same steps, and the repo's written policy (AGENTS.md / CLAUDE.md) decides approvals and merges: if it already allows agents to merge when green, or to admin-merge, flow doesn't ask again. Install the gate only where you want human `spec@`/`ship@` approvals on high-risk work; with the gate installed, nothing merges past a red `flow` check and agents never use `--admin`.
 
 Other commands, when you want them:
 
@@ -163,7 +163,7 @@ Explicit corrections like the examples above are caught; implicit ones ("no, use
 - Session constraints ("don't merge") are enforced by the Bash guard on a best-effort basis; GitHub's required checks remain the hard layer.
 - **No constraint rules ship yet.** The engine is there, but rules arrive only as proven improvements. The demo's no-merge rule handled every command in five cases, then missed one phrasing in its fourth unseen round, so the gate rejected it ([results](docs/demo/flow-2.1/RESULTS.md)).
 - Behavioral evals need spend approval, recorded from your own prompt ("approve spend up to $20"); the hooks refuse `--approve-spend` without it.
-- The demo's two instruction changes (outcome drift, overengineering) were evaluated on Opus through real plugin loading: the current flow already passed every run (9/9 each), so the gate returned `cannot-reproduce` and neither change was promoted. No regressions ([behavioral results](docs/demo/flow-2.1/BEHAVIORAL.md)).
+- The demo's two instruction changes (outcome drift, overengineering) were evaluated on Opus through real plugin loading (correction, flow 2.2: in those runs the plugin copy lacked `learn/`, so the hooks failed to load and the runs measured skills without hooks; see `docs/flow-2.2-design.md`): the current flow already passed every run (9/9 each), so the gate returned `cannot-reproduce` and neither change was promoted. No regressions ([behavioral results](docs/demo/flow-2.1/BEHAVIORAL.md)).
 
 ```bash
 node plugins/flow/learn/cli.mjs report            # from a checkout; an installed plugin's CLI is in ~/.claude/plugins/cache/…/flow/<version>/learn/cli.mjs

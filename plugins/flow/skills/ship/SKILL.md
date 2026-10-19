@@ -20,7 +20,7 @@ user-invocable: false
    - what's unknown;
    - what's being authorized.
    In signed mode they run `node .github/flow/flow.mjs approve "<line>" --pr <N>` on their machine. Never post or sign an approval yourself.
-5. **Merge** only when the `flow` check is green. Never use `--admin` past it and never bypass protection. Use auto-merge only if the human authorized it for this kind of change. In a repo without the gate (no `.flow/config.json`), there is no `flow` check: the repo's written release policy decides how to merge (`/flow:start`, "Repos without the gate").
+5. **Merge** only when the `flow` check is green. In a gated repo never use `--admin` and never bypass protection. Use auto-merge only if the human authorized it for this kind of change. In a repo without the gate (no `.flow/config.json`), there is no `flow` check: the repo's written release policy decides how to merge (`/flow:start`, "Repos without the gate").
 6. **Deploy** through the repo's normal pipeline, never by hand. Prove the release contains the change: a deployment record, the serving sha, or a deploy tag. A merge is not a deploy.
 7. **Verify live:** run the canary criteria and record their evidence. Before widening a rollout, run `node .github/flow/flow.mjs rollout-ok --pr <N>`. It refuses while an assumption marked `blocks: rollout` is unverified.
 8. **Watch** errors and metrics after the deploy. If things are worse, propose a rollback and wait, unless the human pre-authorized one.

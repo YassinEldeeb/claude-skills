@@ -7,7 +7,7 @@ user-invocable: false
 # Build
 
 1. **High work:** first `node .github/flow/flow.mjs sync <ID>`. The edit hook holds code changes until the approved spec is recorded.
-2. **The first reviewable result first** (`/flow:start` §6): one representative example through the real path (the walking skeleton), with every dependency you don't control wired and checked in its source of truth. Its failing test comes first, like every step below. Record the round in `progress.md` with its artifact, tell the engineer in a line, and continue: a checkpoint is a notification, not a question. One builder until it works.
+2. **The first reviewable result first** (`/flow:start` §6): one representative example through the real path (the walking skeleton), with every dependency you don't control wired and checked in its source of truth. Its failing test comes first, like every step below. Record the round in `progress.md` with its artifact, tell the engineer in a line, and continue: a round is a notification, not a question (the human checkpoints in `/flow:start` still stop). One builder until it works.
 3. **Write the failing tests first,** one or more per criterion, of the agreed kind:
    - integration tests where `config.verify.integration.paths` says;
    - fault-injection tests that really break the commit, the network or the process;
