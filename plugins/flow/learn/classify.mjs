@@ -118,22 +118,30 @@ export function violatedConstraint(command, rules, active) {
  * to $20" or "don't merge"; only text the engineer typed may grant spend, set a constraint or count as a correction.
  */
 export function ownWords(text) {
-  let rest = String(text ?? ""), out = "";
-  const open = /<pasted_content\b([^<>]*)>/i;
+  const all = String(text ?? "");
   const idOf = (attrs) => /\bid\s*=\s*"([^"<>]*)"/i.exec(attrs)?.[1];
-  for (let m = open.exec(rest); m; m = open.exec(rest)) {
-    out += rest.slice(0, m.index) + " ";
-    const after = rest.slice(m.index + m[0].length);
-    // A block ends at the LAST closing tag with its id (any closing tag when it has none): a paste can't end itself
-    // early by quoting a closing tag, and when in doubt more text counts as pasted, never less.
+  // One pass over the closing tags: the end of the last one per id, and of the last one overall.
+  const lastById = new Map();
+  let lastAny = -1;
+  for (const c of all.matchAll(/<\/pasted_content\b([^<>]*)>/gi)) {
+    const end = c.index + c[0].length, id = idOf(c[1]);
+    lastAny = end;
+    if (id != null) lastById.set(id, end);
+  }
+  // A block ends at the LAST closing tag with its id (any closing tag when it has none): a paste can't end itself
+  // early by quoting a closing tag, and when in doubt more text counts as pasted, never less.
+  let out = "", at = 0;
+  const open = /<pasted_content\b([^<>]*)>/gi;
+  for (let m = open.exec(all); m; m = open.exec(all)) {
+    if (m.index < at) continue;
+    out += all.slice(at, m.index) + " ";
     const id = idOf(m[1]);
-    let end = -1;
-    for (const c of after.matchAll(/<\/pasted_content\b([^<>]*)>/gi)) if (id == null || idOf(c[1]) === id) end = c.index + c[0].length;
-    if (end < 0) return out; // unclosed: everything after it is pasted (fail closed)
-    rest = after.slice(end);
+    const end = id == null ? lastAny : lastById.get(id) ?? -1;
+    if (end <= open.lastIndex) return out; // unclosed: everything after it is pasted (fail closed)
+    at = open.lastIndex = end;
   }
   // An opening tag that never closes its own bracket also starts a paste.
-  const broken = rest.search(/<pasted_content\b/i);
+  const rest = all.slice(at), broken = rest.search(/<pasted_content\b/i);
   return out + (broken < 0 ? rest : rest.slice(0, broken));
 }
 

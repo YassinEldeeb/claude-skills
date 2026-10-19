@@ -76,6 +76,7 @@ describe("pasted text is never the engineer's words", () => {
     const started = Date.now();
     ownWords("<pasted_content " + "x".repeat(1_000_000));
     ownWords(`<pasted_content id="a">${"y ".repeat(500_000)}</pasted_content id="a"> mine`);
+    ownWords(Array.from({ length: 20_000 }, (_, i) => `<pasted_content id="${i}">x</pasted_content id="${i}">`).join(" "));
     assert.ok(Date.now() - started < 1000, `${Date.now() - started} ms`);
   });
 });
