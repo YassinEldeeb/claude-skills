@@ -78,6 +78,12 @@ Skip only when nothing scales and nothing depends on something you haven't touch
 - **Two rounds off-track,** or a missed forecast: no more code. A 🔴 decision with what you measured and plan B, as soon as you know.
 - **Measure like production** (model, data, dates, config); anything else is labelled and decides nothing. **Evals stay small:** noise measured first, and if reading 20 outputs answers it, read them.
 
+## Repos without the gate
+
+In a repo with no `.flow/config.json`, run the same steps (classify with `../../templates/config.json`'s risk rules, prove it first, rounds, verify), with two differences:
+- **Approvals and merges follow the repo's written policy** (AGENTS.md / CLAUDE.md), not checkpoints 1 and 3: there is no gate to approve against. Standing authorization in that policy counts (for example "merge when green, admin merge allowed"); don't stop to ask for what it already allows. 🔴 decisions (product, privacy, cost, a missed forecast) still go to the human.
+- **Keep the task in the PR description** (outcome, criteria, capacity, the latest round) unless the repo asks for `.flow/` files.
+
 ## 8. Ask only what's ambiguous
 
 Batch questions as multiple choice, each with your recommended default. A small bug may need none; a new system may need many. Never ask what the code, the data or a sensible default can answer.

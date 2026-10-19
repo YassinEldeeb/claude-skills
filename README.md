@@ -32,6 +32,8 @@ A typo ships with no ceremony. Later prompts on the same branch pick the task up
 - **Shows you every round.** Each milestone ends with something you can see and the same three or fewer outcome numbers, in `.flow/tasks/<ID>/progress.md`.
 - **Stops and rethinks.** The same kind of bug fixed twice, two rounds off-track, or a forecast that misses the deadline means no more code until there's a better plan.
 
+**Repos with their own release policy.** In a repo without the flow gate (no `.flow/config.json`), `/flow:start` runs the same steps, and the repo's written policy (AGENTS.md / CLAUDE.md) decides approvals and merges: if it already allows agents to merge when green, or to admin-merge, flow doesn't ask again. Install the gate only where you want human `spec@`/`ship@` approvals on high-risk work; with the gate installed, nothing merges past a red `flow` check, `--admin` included.
+
 Other commands, when you want them:
 
 | Command | What it does |
