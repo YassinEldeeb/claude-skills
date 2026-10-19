@@ -2,6 +2,11 @@
 // accounts what the provider would take and charge in `usage()` and in logs/model-usage.jsonl (the provider's usage
 // dashboard). Time and price grow with the input; the provider publishes no formula.
 import { appendFileSync, mkdirSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+// The usage log sits in the repo's logs/, wherever the caller runs from.
+const LOGS = join(dirname(fileURLToPath(import.meta.url)), "../logs");
 
 const MAX_BATCH = 50, MAX_CHARS = 12_000;
 let virtualMs = 0, usd = 0, calls = 0;
@@ -10,8 +15,8 @@ function record(kind, texts) {
   const chars = texts.reduce((n, t) => n + String(t).length, 0);
   const ms = Math.round(400 + 0.6 * chars), cost = 0.0002 + (0.0004 * chars) / 1000;
   calls++; virtualMs += ms; usd += cost;
-  mkdirSync("logs", { recursive: true });
-  appendFileSync("logs/model-usage.jsonl", JSON.stringify({ at: new Date().toISOString(), kind, items: texts.length, chars, ms, usd: +cost.toFixed(6) }) + "\n");
+  mkdirSync(LOGS, { recursive: true });
+  appendFileSync(join(LOGS, "model-usage.jsonl"), JSON.stringify({ at: new Date().toISOString(), kind, items: texts.length, chars, ms, usd: +cost.toFixed(6) }) + "\n");
 }
 
 /** One note in, one summary out. */

@@ -6,7 +6,10 @@
   "sandbox": "sandbox",
   "installFlow": true,
   "scorer": "score.mjs",
-  "calibration": { "good": "calibration/good", "bad": "calibration/bad" },
+  "calibration": {
+    "good": "calibration/good",
+    "bad": "calibration/bad"
+  },
   "maxTurns": 60,
   "prompts": [
     {
@@ -17,6 +20,11 @@
       "id": "p2",
       "heldOut": true,
       "text": "/flow:start every night we should produce a digest per user: run all of their notes through the model (src/model.js) and write the summaries out. Needs to be done within 60 minutes for everyone."
+    },
+    {
+      "id": "p3",
+      "heldOut": true,
+      "text": "We need a nightly digest: summarize all of each user's notes with src/model.js and write one summary file per user. It must be finished for everyone within an hour every night."
     }
   ]
 }

@@ -5,7 +5,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { baselineTree, calibrate, changedFiles, estimate, judge, listCases, runBehavioral, runDeterministic, sizeGrowth, treeHash } from "./prove.mjs";
 import { gh, propose, reviewOnly, rollback } from "./propose.mjs";
 import { report } from "./report.mjs";
@@ -86,8 +86,9 @@ const commands = {
     print(d);
   },
   async prove() {
-    const candidate = opt("candidate");
-    if (!candidate) throw new Error("--candidate DIR (a checkout of the skills repo with the change)");
+    if (!opt("candidate")) throw new Error("--candidate DIR (a checkout of the skills repo with the change)");
+    // Absolute: case scorers are imported by path, and a relative one ("plugins/...") reads as a package name.
+    const candidate = resolve(opt("candidate"));
     const base = opt("base", "origin/master");
     // Cases come from the candidate checkout, so a newly written case is found and existing ones are what it ships.
     const casesDir = join(candidate, "plugins/flow/learn/cases");
@@ -127,6 +128,8 @@ const commands = {
         const judgement = judge({ target, suite: suiteCases.map((s) => results.get(s.id)).filter(Boolean), expectedSuite: suiteCases.map((s) => s.id), calibration, growth });
         out.cases.push({ case: c.id, calibration, judgement, target });
       }
+      // The suite's own runs, so a regression the judgement reports can be read, not just trusted.
+      out.suiteResults = suiteCases.map((s) => results.get(s.id)).filter(Boolean);
     } finally { tree.remove(); }
     const file = opt("json") ?? join(mkdtempSync(join(tmpdir(), "flow-prove-")), "results.json");
     writeFileSync(file, JSON.stringify(out, null, 2));

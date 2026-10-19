@@ -11,18 +11,44 @@ claude plugin install flow@yassin-skills
 ```
 Then, in your repo: `/flow:install`.
 
-flow scales the rigor to the risk. A typo ships with no ceremony. A new background pipeline gets its architecture, economics and test method challenged **before** the code exists, and can't merge without evidence and a human's approval of exactly what ships.
+**One command.** In a repo with flow installed:
+
+```
+/flow:start <what you want>
+```
+
+That's the whole interface. flow sizes the risk (small / medium / high) and runs every step itself. It comes back to you only when it needs you:
+
+1. **Spec approval** (high risk only): the outcome, design, capacity forecast and safety boundaries on one screen, before code.
+2. **A decision only you can make**: a product, privacy or cost call, or a plan that won't meet your target. It brings a recommendation and keeps working on everything that doesn't depend on the answer.
+3. **Ship approval** (high risk only): what works, what's verified, what's unknown, before merge.
+
+A typo ships with no ceremony. Later prompts on the same branch pick the task up where it is: you don't type `/flow:start` again, and flow never hands you a flow command to run.
+
+**What it does on the way.** These steps catch the expensive mistakes early:
+
+- **Proves the risky part first.** Before building broadly, it runs the shape it plans to build on a real sample (real data, production's model and settings), measures time and cost, and forecasts the whole workload against your target. A plan that misses comes back as plan B, before the code exists.
+- **Builds the thinnest real path next.** Input to output through the real system, with every outside dependency (other repos, flags, permissions, data access) wired and checked. One builder until that works.
+- **Shows you every round.** Each milestone ends with something you can see and the same three or fewer outcome numbers, in `.flow/tasks/<ID>/progress.md`.
+- **Stops and rethinks.** The same kind of bug fixed twice, two rounds off-track, or a forecast that misses the deadline means no more code until there's a better plan.
+
+Other commands, when you want them:
 
 | Command | What it does |
 |---|---|
-| `/flow:start <goal>` | **The entry point.** Classifies the risk (small / medium / high) and runs the right steps in order, stopping only at the human checkpoints |
-| `/flow:challenge` | Production evidence, the 7 design questions, alternatives, capacity and cost ("could we drop 80% of this?"), an independent attack |
-| `/flow:build` | Builds to failing tests inside the approved spec |
-| `/flow:verify` | Independent check of behavior, safety invariants, integration and eval validity |
-| `/flow:ship` | PR with evidence, gate green, merge, deploy through the pipeline, verify live |
-| `/flow:status` | Where each task really is: built → tested → integrated → merged → deployed → authorized |
-| `/flow:orchestrate` | Optional: several builders on dependent tasks, contracts first, one verified release |
+| `/flow:status` | Where each task really is: built → tested → integrated → merged → deployed → authorized, plus the last round's scorecard |
 | `/flow:install` | Installs or upgrades flow in a repo (also migrates flow 1.x) |
+| `/flow:learn` | Turns a recurring correction into a proven skill improvement (explicit only) |
+
+Under the hood, `/flow:start` runs these steps itself (they don't appear in the `/` menu):
+
+| Step | What it does |
+|---|---|
+| `challenge` | Production evidence, a measured run of the risky part, the 7 design questions, alternatives, capacity and cost ("could we drop 80% of this?"), an independent attack |
+| `build` | The walking skeleton first, then failing tests inside the approved spec |
+| `verify` | Independent check of behavior, safety invariants, integration and eval validity |
+| `ship` | PR with evidence, gate green, merge, deploy through the pipeline, verify live |
+| `orchestrate` | Several builders on dependent tasks, after the skeleton works: contracts first, one verified release |
 
 ### How it works
 

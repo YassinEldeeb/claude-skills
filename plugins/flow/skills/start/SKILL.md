@@ -5,7 +5,7 @@ description: The one entry point of flow. The engineer types /flow:start <goal> 
 
 # Start
 
-One command runs the whole task. The engineer types `/flow:start <goal>` once. You run every step below in order, without being told the next one, and come back only at a checkpoint (below) or when the work is done. **Never end a turn by telling the engineer to run a flow command: run that step yourself** (load the skill named in the table with the Skill tool and follow it).
+One command runs the whole task. The engineer types `/flow:start <goal>` once. You run every step below in order, without being told the next one, and come back only at a checkpoint (below) or when the work is done. **Never end a turn by telling the engineer to run a flow command: run that step yourself.**
 
 The goal: catch expensive mistakes (wrong problem, wrong architecture, wrong economics, wrong test method) while they are cheap, show working results early and often, and spend no ceremony on small work.
 
@@ -26,8 +26,10 @@ Read the relevant code, recent PRs, logs and data. For a bug, find the first cau
 | Tier | Steps, all run by you | Human |
 |---|---|---|
 | Small | Reproduce → fix → test → PR with a `## Evidence` section. No task. | None |
-| Medium | Task → prove it first (§5) → `flow:build` → `flow:verify` → `flow:ship` | None, unless you need an override or a 🔴 decision |
-| High | Production evidence → task → prove it first (§5) → `flow:challenge` → draft PR with only the spec → **checkpoint 1** → `flow.mjs sync` → `flow:build` → `flow:verify` → `flow:ship` (**checkpoint 3**) | `spec@` before code, `ship@` before merge |
+| Medium | Task → prove it first (§5) → `/flow:build` → `/flow:verify` → `/flow:ship` | None, unless you need an override or a 🔴 decision |
+| High | Production evidence → task → prove it first (§5) → `/flow:challenge` → draft PR with only the spec → **checkpoint 1** → `flow.mjs sync` → `/flow:build` → `/flow:verify` → `/flow:ship` (**checkpoint 3**) | `spec@` before code, `ship@` before merge |
+
+Each `/flow:<step>` is a skill: load it with the Skill tool (`flow:build`, `flow:verify`, ...) and follow it to its end before the next one. Don't fold a step into another: a medium task isn't done until every criterion has evidence in `task.json`, `verify.md` ends with a verdict, and a PR is open (or the one thing blocking it is named).
 
 ## 4. The task (medium and high)
 
@@ -48,40 +50,33 @@ Agree the criteria and how each will be proven before substantial implementation
 
 ## 5. Prove it first (medium and high)
 
-Before building broadly, run the riskiest part for real, small, and measure it. Plans fail on the assumption nobody ran: a throughput that turns days into weeks, an access nobody has, a dependency that is off in production, an output nobody finds useful.
+Plans fail on the assumption nobody ran: a throughput that turns hours into days, an access nobody has, a dependency that is off in production. Before building broadly:
 
-1. **Name the one assumption** that, if wrong, makes the plan worthless. Usually: time and cost at real volume, access to data or a system you don't control, or whether the output is useful at all.
-2. **Run the shape you plan to build**, not one component of it, on real data: a real sample, production's model, provider and settings. A throwaway script is fine (for high work keep it outside the repo or under `.flow/tasks/<ID>/spike/`: the edit hook holds repo code until the spec is approved).
-3. **Measure and forecast.** Record time, calls and cost, and read a sample of the output. Scale it to the whole workload (the heaviest real case, not the average) and compare with the outcome's target and deadline. Put the numbers in `capacity` (`source: measured`, `ref`, `at`), including `latency.fullCompletion`.
-4. **If the forecast misses, change the design now.** Bring plan B (prefer a faster path that already exists) as a 🔴 decision with both forecasts. Don't start building plan A and hope.
-5. Write it down as round 0 in `.flow/tasks/<ID>/progress.md` (format in §6).
+1. **Name the one assumption** that would sink the plan (time and cost at real volume, access you don't control, whether the output is useful).
+2. **Run the shape you plan to build on a real sample**, with production's model and settings. A throwaway script is fine; for high work keep it outside the repo (the edit hook holds repo code until the spec is approved).
+3. **Forecast the whole workload from the measurement**, heaviest real case included, against the target and deadline. Record it in `capacity` (`source: measured`, `ref`, `at`, and `latency.fullCompletion`) and as round 0 in `progress.md` (§6).
+4. **If it misses, change the design now:** plan B (prefer an existing faster path) as a 🔴 decision with both forecasts.
 
-Skip this only when nothing in the task scales or depends on something you haven't touched, and say so in `log`.
+Skip only when nothing scales and nothing depends on something you haven't touched; say so in `log`.
 
-## 6. Rounds: the shortest real path first, then show it every time
+## 6. Rounds
 
-- **Round 1 is the walking skeleton:** the thinnest path through the real system, end to end (input → stored → published → used by the next real step), with anything simulated named. Wire every dependency you don't control (other repos, flags, permissions, data access) in this round, and check each one in its source of truth, not in a report.
-- **One builder until round 1 works.** Parallel builders (`flow:orchestrate`) only after it, contracts first.
-- **Every round ends with something the engineer can see** (an output file, a real run, a screenshot) and the same scorecard: at most 3 outcome numbers, against absolute targets, never only "no regression against main". Append it to `progress.md`:
+- **Round 1 is the walking skeleton:** the thinnest real end-to-end path (input → stored → published → used), simulated parts named, every outside dependency (other repos, flags, permissions, data access) wired and checked at its source. One builder until it works.
+- **Every round ends with something the engineer can see** and the same scorecard (at most 3 outcome numbers, absolute targets), appended to `.flow/tasks/<ID>/progress.md`:
 
 ```
 ## Round 2: skeleton on real data (2026-10-19)
-- shows: what the engineer can now see or do, with the path or link
-- scorecard: heavy user done in 14 h (target 2 h) · $3.10 per user (target $1) · 18/20 useful in a read sample
-- forecast: whole cohort in 3 days at this rate; deadline Tuesday, misses
+- shows: what the engineer can now see or do (path or link)
+- scorecard: heavy user done in 14 h (target 2 h) · $3.10 per user (target $1) · 18/20 useful
+- forecast: whole cohort in 3 days; deadline Tuesday, misses
 - verdict: off-track
 ```
 
-`verdict` is `on-track` or `off-track`.
+## 7. Stop and rethink
 
-## 7. Stop and rethink (all the way through)
-
-- **Two strikes:** the same kind of failure fixed twice means stop patching. Ask which operation you can remove or restrict so the whole class can't happen (a smaller allowed edit, a structural constraint instead of a text rule). Record the answer in `log`.
-- **Two rounds off-track,** or a scorecard that didn't move: stop adding code. Raise a 🔴 decision: what you measured, why it isn't converging, plan B with its forecast.
-- **A forecast that misses the deadline** is said the moment you know it, with plan B. Never compensate with optimistic reporting or quietly smaller scope.
-- **Measure like production:** same model, data shape, dates and config. A number from a different setup is labelled as such and decides nothing.
-- **Evals stay small:** a fixed set that answers the question, its noise measured first (run the baseline twice). If reading 20 outputs answers it, read them. Eval code never outgrows the product.
-- **Know the cycle cost** (CI, review bots, deploy waits) and batch small fixes into one push.
+- **Two strikes:** the same kind of failure fixed twice means stop patching; remove or restrict the operation that causes it. Note it in `log`.
+- **Two rounds off-track,** or a missed forecast: no more code. A 🔴 decision with what you measured and plan B, as soon as you know.
+- **Measure like production** (model, data, dates, config); anything else is labelled and decides nothing. **Evals stay small:** noise measured first, and if reading 20 outputs answers it, read them.
 
 ## 8. Ask only what's ambiguous
 
@@ -89,7 +84,7 @@ Batch questions as multiple choice, each with your recommended default. A small 
 
 ## Checkpoints (the only interruptions)
 
-1. **Before high-risk code:** the human approves the outcome, criteria, design trade-offs, capacity and safety boundaries, on one screen (`flow:challenge` output plus the gate's PR comment).
+1. **Before high-risk code:** the human approves the outcome, criteria, design trade-offs, capacity and safety boundaries, on one screen (`/flow:challenge` output plus the gate's PR comment).
 2. **When an approved boundary changes:** a different architecture, product behavior, a safety or privacy concern, a major cost change, weaker criteria, or a forecast that misses (§7). Edit the spec openly. The gate notices the hash changed and asks again. Bring a recommendation and what each option costs.
 3. **Before high-risk merge and rollout:** what works, what's verified, what's unknown, and the exact thing being authorized (`ship@`).
 
@@ -97,9 +92,4 @@ Everything else is yours to decide.
 
 ## Keep going
 
-After each step, start the next one. Before you end a turn, check where the task is:
-- **at a checkpoint or a 🔴 decision:** say what you need in one ready-to-paste ask, then keep doing the work that doesn't depend on it;
-- **waiting on something outside the session** (CI, a deploy, a long run): name it and how you'll know it's done;
-- **done:** deployed and the canary criteria verified, or the engineer stopped it.
-
-Otherwise, continue. On a later prompt in the same branch, pick the task up where `progress.md` and `flow.mjs status <ID>` say it is; the engineer doesn't type `/flow:start` again.
+Before you end a turn, the task is at a checkpoint or 🔴 decision (one ready-to-paste ask, and you keep doing what doesn't depend on it), waiting on something outside the session (name it), or done (deployed and verified). Otherwise, continue. A later prompt on this branch resumes from `progress.md` and `flow.mjs status <ID>`.

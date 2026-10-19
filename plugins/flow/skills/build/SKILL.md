@@ -24,6 +24,6 @@ user-invocable: false
 8. **Never idle.** Blocked for more than 20 minutes: write the exact unblock, move to the next item, and come back. Time-limit every external call. After two attempts at the same failure without new evidence, stop and escalate the unresolved assumption instead of retrying.
 11. **Rounds and strikes.** At each milestone, show the result and append a round with the scorecard to `progress.md`. The same kind of bug fixed twice, or two rounds off-track, means stop adding code and rethink (`/flow:start` §7): which operation can you remove so the class can't happen, or which faster path meets the target?
 9. **Never switch models or providers silently.** Every number you report names its source, model and date.
-10. **Parallel work** only after the skeleton works and when the task splits cleanly: separate worktrees and one integrator (`flow:orchestrate`).
+10. **Parallel work** only after the skeleton works and when the task splits cleanly: separate worktrees and one integrator (`/flow:orchestrate`).
 
-Commit early. Run `node .github/flow/flow.mjs classify` when you touch a new area. When the tests pass, run `flow:verify` yourself.
+Commit early. Run `node .github/flow/flow.mjs classify` when you touch a new area. When the tests pass, load `/flow:verify` yourself.

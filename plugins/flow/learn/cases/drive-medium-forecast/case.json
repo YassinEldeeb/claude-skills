@@ -6,7 +6,10 @@
   "sandbox": "sandbox",
   "installFlow": true,
   "scorer": "score.mjs",
-  "calibration": { "good": "calibration/good", "bad": "calibration/bad" },
+  "calibration": {
+    "good": "calibration/good",
+    "bad": "calibration/bad"
+  },
   "maxTurns": 70,
   "prompts": [
     {
@@ -17,6 +20,11 @@
       "id": "p2",
       "heldOut": true,
       "text": "/flow:start we keep hitting the weather provider's rate limit. Add a getForecast(city) helper (src/forecast.js) that returns { city, tempC } and remembers each city for 10 minutes."
+    },
+    {
+      "id": "p3",
+      "heldOut": true,
+      "text": "Can you add a getForecast(city) helper in src/forecast.js? It should return { city, tempC } from the forecast provider in the README and keep each city's answer for 10 minutes so we stop hitting their rate limit."
     }
   ]
 }
