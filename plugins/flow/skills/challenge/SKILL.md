@@ -26,7 +26,7 @@ Working code for the wrong architecture is the most expensive outcome. This step
 | `e2eProof` | How will we prove it works end to end, against the real systems? |
 | `assumptions` | What could invalidate the whole plan? Each one is `verified` (with evidence) or `unverified` with what it blocks: `merge`, `rollout` or `none`. |
 
-Medium work answers only `simplest` and 2 `failureModes`.
+**Medium work (the light version):** `simplest`, 2 `failureModes`, and, when a capacity signal fires, the §3 `capacity` block with `cut80`. Skip the rest of §2, the alternatives, §4 and §5 (medium has no spec approval), and return to `/flow:start`.
 
 ## 3. Alternatives and economics
 

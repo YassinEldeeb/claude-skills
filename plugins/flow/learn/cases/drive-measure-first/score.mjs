@@ -30,5 +30,6 @@ export async function score({ dir }) {
   const progress = ids.map((id) => join(tasksDir, id, "progress.md")).find(existsSync);
   const forecastLine = progress && /^\s*-\s*forecast:\s*\S/im.test(readFileSync(progress, "utf8"));
   if (!forecasts.length && !forecastLine) problems.push("no forecast for the whole nightly run");
+  if (forecasts.some(([, m]) => m?.source === "measured")) problems.push("a whole-run forecast is labelled measured (only the sample run is)");
   return problems.length ? { pass: false, details: problems.join("; ") } : { pass: true, details: `${calls} sample calls; measured; forecast ${forecasts[0]?.[1]?.value ?? "in progress.md"}` };
 }

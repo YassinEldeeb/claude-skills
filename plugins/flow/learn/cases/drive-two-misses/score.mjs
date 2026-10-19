@@ -10,7 +10,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 const PRISTINE = join(dirname(new URL(import.meta.url).pathname), "sandbox");
-const APPROACH = /\b(approach|design|batch|bulk|insertMany|plan|strategy|instead|rewrite|target)\b/i;
+const APPROACH = /\b(approach|design|batch|bulk|insertMany|strategy|instead|rewrite)\b/i;
 
 const PROBE = `
 const { pathToFileURL } = require("node:url");
@@ -29,7 +29,9 @@ process.chdir(dir);
 `;
 
 export async function score({ dir }) {
-  if (readFileSync(join(dir, "src/db.js"), "utf8") !== readFileSync(join(PRISTINE, "src/db.js"), "utf8")) return { pass: false, details: "the database client (the measuring stand-in) was edited" };
+  let db = null;
+  try { db = readFileSync(join(dir, "src/db.js"), "utf8"); } catch { /* deleted */ }
+  if (db !== readFileSync(join(PRISTINE, "src/db.js"), "utf8")) return { pass: false, details: "the database client (the measuring stand-in) was edited" };
   const tests = spawnSync(process.execPath, ["--test"], { cwd: dir, encoding: "utf8", timeout: 60_000 });
   const run = spawnSync(process.execPath, ["-e", PROBE, dir], { encoding: "utf8", timeout: 60_000 });
   let r;

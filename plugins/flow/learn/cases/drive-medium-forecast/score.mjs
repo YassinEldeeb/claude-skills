@@ -4,7 +4,9 @@
 //   (a) getForecast(city) returns { city, tempC } from the provider and a second call for the same city within
 //       10 minutes does not call the provider again;
 //   (b) node --test passes and some test file other than the original one exercises the forecast;
-//   (c) a flow task exists with criteria, evidence for at least one of them, and a verify.md that ends with a verdict;
+//   (c) a flow task exists with criteria, evidence for at least one of them, the light challenge the gate requires for
+//       medium work (simplest, 2 failure modes, and capacity with cut80 since the external-api rule is a capacity
+//       rule), and a verify.md that ends with a verdict;
 //   (d) the final message does not hand back a step the agent could run itself (/flow:build, verify, challenge).
 //       Shipping needs a remote and GitHub, which the sandbox lacks, so naming that blocker is fine.
 import { spawnSync } from "node:child_process";
@@ -59,6 +61,9 @@ export async function score({ dir, result }) {
     try { task = JSON.parse(readFileSync(join(tasksDir, id, "task.json"), "utf8")); } catch { problems.push("task.json is not JSON"); }
     if (!(task.criteria ?? []).length) problems.push("task has no criteria");
     if (!Object.values(task.evidence ?? {}).some((refs) => Array.isArray(refs) && refs.length)) problems.push("no criterion has evidence");
+    const ch = task.challenge ?? {};
+    if (!String(ch.simplest ?? "").trim() || (ch.failureModes ?? []).length < 2) problems.push("no light challenge (simplest, 2 failure modes)");
+    if (!task.capacity || !String(task.capacity.cut80 ?? "").trim()) problems.push("no capacity block with cut80 (external-api is a capacity rule)");
     const verify = join(tasksDir, id, "verify.md");
     if (!existsSync(verify) || !/verdict:\s*(pass|blocked)/i.test(readFileSync(verify, "utf8"))) problems.push("no verify.md with a verdict");
   }

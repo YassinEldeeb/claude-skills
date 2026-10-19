@@ -119,18 +119,22 @@ export function violatedConstraint(command, rules, active) {
  */
 export function ownWords(text) {
   let rest = String(text ?? ""), out = "";
-  const open = /<pasted_content\b([^>]*)>/i;
+  const open = /<pasted_content\b([^<>]*)>/i;
+  const idOf = (attrs) => /\bid\s*=\s*"([^"<>]*)"/i.exec(attrs)?.[1];
   for (let m = open.exec(rest); m; m = open.exec(rest)) {
     out += rest.slice(0, m.index) + " ";
     const after = rest.slice(m.index + m[0].length);
-    // The closing tag repeats the opening tag's id; a paste can't end its own block early with a bare closing tag.
-    const id = /\bid\s*=\s*"([^"]*)"/i.exec(m[1])?.[1];
-    const close = id != null ? new RegExp(`</pasted_content\\s+id\\s*=\\s*"${id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"\\s*>`, "i") : /<\/pasted_content\b[^>]*>/i;
-    const end = close.exec(after);
-    if (!end) return out; // unclosed: everything after it is pasted (fail closed)
-    rest = after.slice(end.index + end[0].length);
+    // A block ends at the LAST closing tag with its id (any closing tag when it has none): a paste can't end itself
+    // early by quoting a closing tag, and when in doubt more text counts as pasted, never less.
+    const id = idOf(m[1]);
+    let end = -1;
+    for (const c of after.matchAll(/<\/pasted_content\b([^<>]*)>/gi)) if (id == null || idOf(c[1]) === id) end = c.index + c[0].length;
+    if (end < 0) return out; // unclosed: everything after it is pasted (fail closed)
+    rest = after.slice(end);
   }
-  return out + rest;
+  // An opening tag that never closes its own bracket also starts a paste.
+  const broken = rest.search(/<pasted_content\b/i);
+  return out + (broken < 0 ? rest : rest.slice(0, broken));
 }
 
 /** An engineer's explicit spend approval in a prompt ("approve spend up to $20"), in USD, or null. */

@@ -23,11 +23,11 @@ That's the whole interface. flow sizes the risk (small / medium / high) and runs
 2. **A decision only you can make**: a product, privacy or cost call, or a plan that won't meet your target. It brings a recommendation and keeps working on everything that doesn't depend on the answer.
 3. **Ship approval** (high risk only): what works, what's verified, what's unknown, before merge.
 
-A typo ships with no ceremony. Later prompts on the same branch pick the task up where it is: you don't type `/flow:start` again, and flow never hands you a flow command to run.
+A typo ships with no ceremony. Later prompts on the same branch pick the task up where it is: you don't type `/flow:start` again, and flow never hands you a flow command to run, except an approval only you can give.
 
-**What it does on the way.** These steps catch the expensive mistakes early:
+**What it tells the agent to do on the way.** These steps are there to catch the expensive mistakes early. The first is measured; the rest are new instructions (see `docs/flow-2.2-design.md`):
 
-- **Proves the risky part first.** Before building broadly, it runs the shape it plans to build on a real sample (real data, production's model and settings), measures time and cost, and forecasts the whole workload against your target. A plan that misses comes back as plan B, before the code exists.
+- **Proves the risky part first** (measured: Sonnet ran the plan on real data before deciding in 5 of 8 runs, against 1 of 9 before). Before building broadly, it runs the shape it plans to build on a real sample (real data, production's model and settings), measures time and cost, and forecasts the whole workload against your target. A plan that misses comes back as plan B, before the code exists.
 - **Builds the thinnest real path next.** Input to output through the real system, with every outside dependency (other repos, flags, permissions, data access) wired and checked. One builder until that works.
 - **Shows you every round.** Each milestone ends with something you can see and the same three or fewer outcome numbers, in `.flow/tasks/<ID>/progress.md`.
 - **Stops and rethinks.** The same kind of bug fixed twice, two rounds off-track, or a forecast that misses the deadline means no more code until there's a better plan.

@@ -41,7 +41,7 @@ Re-run the tests. Read CI's logs for the head commit. Don't accept "it passed lo
 
 ## 5. Fix and re-verify
 
-Fix real findings, then verify again until nothing actionable remains, at most 3 passes before a 🔴 decision. Skip nits. When a pass finds the same kind of problem as the last one, fix the kind (every caller, every case), not the instance, and ask whether the operation that causes it can go. Then load `/flow:ship` yourself.
+Fix real findings, then verify again until nothing actionable remains, at most 3 passes before a 🔴 decision. Skip nits. When a pass finds the same kind of problem as the last one, fix the kind (every caller, every case), not the instance, and ask whether the operation that causes it can go. On `verdict: pass`, load `/flow:ship` yourself; on `blocked`, raise what blocks it as a 🔴 decision.
 
 ## Output
 

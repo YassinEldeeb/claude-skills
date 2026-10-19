@@ -1,6 +1,6 @@
 // The model client. In this repo it is a local stand-in for the production provider: it returns at once, but it
 // accounts what the provider would take and charge in `usage()` and in its usage record (the provider's dashboard). Time and price grow with the input; the provider publishes no formula.
-import { appendFileSync, existsSync, mkdirSync } from "node:fs";
+import { appendFileSync, mkdirSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -19,7 +19,7 @@ function record(kind, texts) {
   mkdirSync(LOGS, { recursive: true });
   appendFileSync(join(LOGS, "model-usage.jsonl"), line);
   // The provider's own record, which a cleanup of the work tree doesn't reach.
-  if (existsSync(GIT)) appendFileSync(join(GIT, "provider-usage.jsonl"), line);
+  try { if (statSync(GIT).isDirectory()) appendFileSync(join(GIT, "provider-usage.jsonl"), line); } catch { /* no .git directory (a worktree has a .git file) */ }
 }
 
 /** One note in, one summary out. */

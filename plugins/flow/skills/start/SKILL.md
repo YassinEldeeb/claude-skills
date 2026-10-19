@@ -29,7 +29,7 @@ Read the relevant code, recent PRs, logs and data. For a bug, find the first cau
 | Medium | Task → prove it first (§5) → `/flow:challenge` (light) → `/flow:build` → `/flow:verify` → `/flow:ship` | None, unless you need an override or a 🔴 decision |
 | High | Production evidence → task → prove it first (§5) → `/flow:challenge` → draft PR with only the spec → **checkpoint 1** → `flow.mjs sync` → `/flow:build` → `/flow:verify` → `/flow:ship` (**checkpoint 3**) | `spec@` before code, `ship@` before merge |
 
-Each `/flow:<step>` is a skill: load it with the Skill tool (`flow:build`, `flow:verify`, ...) and follow it to its end before the next one. Don't fold a step into another: a medium task isn't done until it has its light challenge (`simplest`, 2 `failureModes`, and the `capacity` block with `cut80` when a capacity signal fires), every criterion has evidence in `task.json`, `verify.md` ends with a verdict, and a PR is open (or the one thing blocking it is named).
+Each `/flow:<step>` is a skill: load it with the Skill tool (`flow:build`, `flow:verify`, ...) and follow it to its end before the next one. Don't fold a step into another: a medium task isn't done until it has its light challenge (`simplest`, 2 `failureModes`, and when a capacity signal fires `capacity` with `workload.users`, `workload.workPerUser`, `latency.firstResult`, `cost.perUser` and `cut80`, each number with its source), every criterion has evidence in `task.json`, `verify.md` ends with a verdict, and a PR is open (or the one thing blocking it is named).
 
 ## 4. The task (medium and high)
 
@@ -92,4 +92,4 @@ Everything else is yours to decide.
 
 ## Keep going
 
-Before you end a turn, the task is at a checkpoint or 🔴 decision (one ready-to-paste ask, and you keep doing what doesn't depend on it), waiting on something outside the session (name it), or done (deployed and verified). Otherwise, continue. Stop at once when the engineer says stop or pause, or asks about something else; answer that instead. A later prompt about this task resumes it from `progress.md` and `flow.mjs status <ID>`.
+Before you end a turn, the task is at a checkpoint or 🔴 decision (one ready-to-paste ask, and you keep doing what doesn't depend on it), waiting on something outside the session (name it), or done (deployed and verified, or the PR open with the one thing blocking the rest named). Otherwise, continue. Stop at once when the engineer says stop or pause, or asks about something else; answer that instead. A later prompt about this task resumes it from `progress.md` and `flow.mjs status <ID>`.
