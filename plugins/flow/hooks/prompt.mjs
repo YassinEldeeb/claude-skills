@@ -6,7 +6,8 @@
 import { closeSync, existsSync, openSync, readSync, statSync } from "node:fs";
 import { performance } from "node:perf_hooks";
 import { classifyPrompt, constraintChanges, isAutomated, ownWords, spendGrant } from "../learn/classify.mjs";
-import { appendLog, captureAllowed, clean, enqueue, loadSession, safe, saveSession } from "../learn/store.mjs";
+import { autoSwitch, startDetached } from "../learn/auto.mjs";
+import { appendLog, captureAllowed, clean, config, enqueue, loadSession, safe, saveConfig, saveSession } from "../learn/store.mjs";
 import { PLUGIN_VERSION, constraintRules, describeConstraints, repoFlowConfig, repoOf, typedByEngineer } from "./capture.mjs";
 
 const TTL_MIN = Number(process.env.FLOW_CACHE_TTL_MIN) || 60;
@@ -62,6 +63,15 @@ try {
         if (start.length) context.push(`[flow] Constraint noted for this session: ${describeConstraints(start, rules).join("; ")}. Hooks refuse it until the engineer lifts it.`);
         if (release.length) context.push(`[flow] Constraint lifted by the engineer: ${describeConstraints(release, rules).join("; ")}.`);
       }
+      // Auto-learn is the engineer's switch, from their own typed words only.
+      const turn = autoSwitch(own);
+      if (turn != null) {
+        const c = config();
+        saveConfig({ ...c, autoLearn: { ...(c.autoLearn ?? {}), enabled: turn } });
+        context.push(turn
+          ? "[flow] Auto-learn is on: after a correction, once the session has been idle for a while, flow analyzes what went wrong, tests a fix to the workflow in the background on the engineer's Claude plan, and opens a draft PR only when the fix is proven. Tell the engineer in one line; \"flow auto-learn off\" turns it off."
+          : "[flow] Auto-learn is off. Tell the engineer in one line.");
+      }
       const grant = spendGrant(own);
       if (grant != null) {
         session.spendApprovedUsd = grant;
@@ -80,7 +90,11 @@ try {
             objective: session.objective, promptIndex: session.prompts,
             model: session.model ?? null, version: PLUGIN_VERSION,
           });
-          if (verdict.kind === "correction") (session.corrections ??= []).push({ category: verdict.category, at: Date.now() });
+          if (verdict.kind === "correction") {
+            (session.corrections ??= []).push({ category: verdict.category, at: Date.now() });
+            // Detached: it waits for this session to go idle, then works in the background (no-op when off).
+            safe(() => startDetached({ session: input.session_id, transcript: input.transcript_path }));
+          }
         }
         // Time since the process started, module loading included (Node's own startup before that is not visible here).
         appendLog("hook-latency.jsonl", { at: new Date().toISOString(), hook: "prompt", ms: Math.round(performance.now()) });

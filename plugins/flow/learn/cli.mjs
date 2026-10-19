@@ -11,6 +11,7 @@ import { gh, propose, reviewOnly, rollback } from "./propose.mjs";
 import { report } from "./report.mjs";
 import { LOGS, appendLog, config, home, path, queueCounts, readJson, readLog, saveConfig, writeLog } from "./store.mjs";
 import { processQueue } from "./worker.mjs";
+import { autoConfig, run as autoRun } from "./auto.mjs";
 
 const USAGE = `flow-learn
   status                     Is capture on, what is queued, how many clusters
@@ -29,7 +30,10 @@ const USAGE = `flow-learn
                              Open or update the cluster's draft PR (only if the results' verdict is improved/enforced)
   rollback PR --candidate DIR --repo OWNER/NAME [--base REF]
                              Open a draft PR reverting a merged improvement
-  report [--refresh]         The measurement report (--refresh reads proposed PRs' states from GitHub)`;
+  report [--refresh]         The measurement report (--refresh reads proposed PRs' states from GitHub)
+  auto status | on | off | run [--session ID]
+                             Auto-learn: after a correction, analyze, fix, prove and open a draft PR in the background
+                             (opt-in; on and off are the engineer's; "flow auto-learn on" typed in a prompt does the same)`;
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -157,6 +161,16 @@ const commands = {
   rollback() {
     const [pr] = positional();
     print(rollback({ dir: opt("candidate"), repo: opt("repo"), pr: Number(pr), base: opt("base", "origin/master") }));
+  },
+  async auto() {
+    const sub = positional()[0] ?? "status";
+    if (sub === "on" || sub === "off") {
+      const c = config();
+      saveConfig({ ...c, autoLearn: { ...(c.autoLearn ?? {}), enabled: sub === "on" } });
+      return print(`auto-learn ${sub}`);
+    }
+    if (sub === "run") return print(await autoRun({ session: opt("session") }));
+    print({ ...autoConfig(), recent: readLog("auto.jsonl").slice(-10) });
   },
   report() {
     if (flag("refresh")) {

@@ -120,6 +120,24 @@ Tested on 2026-10-16 in a private throwaway repo: a ruleset requiring `flow` fro
 - Deploy verification is repo-specific. The dashboard shows `deployed` only from GitHub deployment records; `flow.mjs rollout-ok` gives a deploy pipeline a hook.
 - Design and trade-offs: [docs/flow-2-design.md](docs/flow-2-design.md).
 
+### Auto-learn: it fixes itself from your rage (flow 2.3)
+
+Type **`flow auto-learn on`** once, in any prompt. From then on, a correction you type ("stop overengineering", "why didn't you ask me first?!", "what have you been doing for 2 hours?!") starts flow's learning loop in the background, with no command to run:
+
+1. **Waits** until that session has been idle for 10 minutes (or has ended), so it never competes with your work.
+2. **Catches what the word list missed:** a Haiku pass over the session's typed prompts labels the frustration it didn't recognize.
+3. **Analyzes:** a fresh agent reads the threads where it happened and writes a synthetic description of the failure and its root cause. None of your words, code or names leave that step.
+4. **Writes the test independently:** a second fresh agent, given only that description, writes the regression case.
+5. **Fixes:** a third makes the smallest change, in skills, rules or constraint rules only.
+6. **Proves:** the real harness runs the current flow against the fix (behavioral runs 4 at a time).
+7. **Opens a draft PR** only when the verdict is `improved` or `enforced`. A fix that doesn't prove is dropped and logged.
+
+Your next session opens with one line saying what it did, for example `auto-learn since you were last here: overengineering--overengineering: PR https://github.com/...`. Point a review agent at the PR to merge it, and everyone using flow gets the fix.
+
+- **Cost:** it runs headless Claude on your own plan (a Max plan has no extra charge). It uses some of your quota, which is why it waits for idle time and is capped at 3 attempts a day, with a 24-hour cooldown per kind of failure.
+- **Control:** `flow auto-learn off` turns it off. Agents can't switch it (the guard refuses `flow-learn auto on/off`). `flow-learn auto status` shows recent attempts.
+- **Limits:** it acts only on failures the skills or constraint rules can fix, never on personal preferences. Proof runs on small synthetic cases, so a proven fix is evidence, not a guarantee. Off by default for everyone but the people who turn it on.
+
 ### Learning from corrections (flow 2.1)
 
 Correct Claude once. flow records the correction, finds the reusable failure behind it, and helps you prove a fix before anyone else gets it: **Capture → Understand → Improve → Prove**.
@@ -128,7 +146,7 @@ Correct Claude once. flow records the correction, finds the reusable failure beh
 |---|---|---|
 | **Capture** | `UserPromptSubmit` records corrections you type ("stop overengineering", "I said no merges", "why didn't you query the real data?"), and praise. `SessionEnd` derives counts from the local transcript: failing-test streaks with no code change in between, repeated non-routine commands, "done" with no test after the last edit. | No model calls. Measured inside the hook: 10–30 ms. Node's own startup comes on top; a reviewer measured 79–367 ms wall time on a heavily loaded laptop. |
 | **Understand** | A deterministic worker clusters incidents by (category, owning skill section or rule). It writes a dossier per cluster, with a synthetic description and no engineer text. | Local |
-| **Improve** | `/flow:learn <cluster>`, run explicitly. It finds the root cause, an independent subagent writes regression cases (with held-out phrasings and bypass attempts), then the smallest fix is made in allowed files only. | Your session's tokens |
+| **Improve** | `/flow:learn <cluster>`, or automatically with auto-learn on (above). It finds the root cause, an independent subagent writes regression cases (with held-out phrasings and bypass attempts), then the smallest fix is made in allowed files only. | Your session's tokens |
 | **Prove** | `flow-learn prove`. Enforcement runs the real hooks from the baseline and the candidate. Behavior runs `claude -p --plugin-dir` (real skill loading) N times per arm, and only with `--approve-spend --budget-usd`. | Free / budgeted |
 | **Propose** | One draft PR per cluster, only after the gate says `enforced` or `improved`. Rate-limited, synthetic text only. Never merged by the tool. | — |
 
