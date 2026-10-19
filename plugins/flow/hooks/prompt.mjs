@@ -6,7 +6,6 @@
 import { closeSync, existsSync, openSync, readSync, statSync } from "node:fs";
 import { performance } from "node:perf_hooks";
 import { classifyPrompt, constraintChanges, isAutomated, ownWords, spendGrant } from "../learn/classify.mjs";
-import { autoSwitch, startDetached } from "../learn/auto.mjs";
 import { appendLog, captureAllowed, clean, config, enqueue, loadSession, safe, saveConfig, saveSession } from "../learn/store.mjs";
 import { PLUGIN_VERSION, constraintRules, describeConstraints, repoFlowConfig, repoOf, typedByEngineer } from "./capture.mjs";
 
@@ -49,6 +48,8 @@ try {
   const own = typeof input.prompt === "string" ? ownWords(input.prompt) : "";
   const human = own.trim() !== "" && typedByEngineer(input) && !isAutomated(own);
 
+  // auto-learn's module only when it can matter (a switch typed, or it's on): the hook stays fast otherwise.
+  const auto = human && (/auto[\s-]?learn/i.test(own) || safe(() => config().autoLearn?.enabled, false)) ? await import("../learn/auto.mjs").catch(() => null) : null;
   if (human) {
     safe(() => {
       const rules = constraintRules();
@@ -64,7 +65,7 @@ try {
         if (release.length) context.push(`[flow] Constraint lifted by the engineer: ${describeConstraints(release, rules).join("; ")}.`);
       }
       // Auto-learn is the engineer's switch, from their own typed words only.
-      const turn = autoSwitch(own);
+      const turn = auto ? auto.autoSwitch(own) : null;
       if (turn != null) {
         const c = config();
         saveConfig({ ...c, autoLearn: { ...(c.autoLearn ?? {}), enabled: turn } });
@@ -93,7 +94,7 @@ try {
           if (verdict.kind === "correction") {
             (session.corrections ??= []).push({ category: verdict.category, at: Date.now() });
             // Detached: it waits for this session to go idle, then works in the background (no-op when off).
-            safe(() => startDetached({ session: input.session_id, transcript: input.transcript_path }));
+            if (auto) safe(() => auto.startDetached({ session: input.session_id, transcript: input.transcript_path }));
           }
         }
         // Time since the process started, module loading included (Node's own startup before that is not visible here).

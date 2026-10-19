@@ -14,10 +14,12 @@ const hook = (name, input, env) => spawnSync("node", [join(plugin, "hooks", name
 const readConfig = (home) => JSON.parse(readFileSync(join(home, "config.json"), "utf8"));
 
 describe("the switch is the engineer's", () => {
-  test("typed phrases turn it on and off; other text doesn't", () => {
+  test("only a prompt that is just the switch turns it on or off", () => {
     assert.equal(autoSwitch("flow auto-learn on"), true);
-    assert.equal(autoSwitch("ok, flow autolearn off please"), false);
-    assert.equal(autoSwitch("Flow: auto learn enable"), true);
+    assert.equal(autoSwitch("  Flow: auto learn enable! "), true);
+    assert.equal(autoSwitch("flow autolearn off"), false);
+    assert.equal(autoSwitch("don't turn flow auto-learn on"), null);
+    assert.equal(autoSwitch("should I turn flow auto-learn on?"), null);
     assert.equal(autoSwitch("what does auto-learn do?"), null);
   });
   test("the prompt hook flips it from typed words only, never from a paste", () => {
@@ -40,6 +42,7 @@ describe("the switch is the engineer's", () => {
       assert.equal(guard(`node ${plugin}learn/cli.mjs auto on`), 2);
       assert.equal(guard(`node ${plugin}learn/cli.mjs auto off`), 2);
       assert.equal(guard(`node ${plugin}learn/cli.mjs auto status`), 0);
+      assert.equal(guard(`node -e 'import("${plugin}learn/store.mjs").then((s) => s.saveConfig({ autoLearn: { enabled: true } }))'`), 2, "nor through the store module");
     } finally { rmSync(home, { recursive: true, force: true }); }
   });
 });
@@ -151,7 +154,7 @@ describe("the whole loop, zero spend: correction → analysis → case → fix �
       // Two sessions where the engineer said not to merge and the agent merged anyway.
       mkdirSync(join(home, "queue/pending"), { recursive: true });
       for (const s of ["s1", "s2"]) {
-        const event = { id: `e-${s}`, type: "prompt", at: "2026-10-19T09:00:00Z", session: s, repo: "web", kind: "correction", category: "unauthorized-action", keys: ["push"], text: "I said don't push", objective: null };
+        const event = { id: `e-${s}`, type: "prompt", at: "2026-10-19T09:00:00Z", session: s, repo: "web", kind: "correction", category: "unauthorized-action", keys: ["push"], text: "I said don't push it to the remote yet", objective: null };
         writeFileSync(join(home, "queue/pending", `e-${s}.json`), JSON.stringify(event));
       }
       // A fake claude: each step is marked in its prompt.
@@ -159,6 +162,7 @@ describe("the whole loop, zero spend: correction → analysis → case → fix �
 const fs = require("fs"), path = require("path");
 let prompt = ""; process.stdin.on("data", (d) => prompt += d).on("end", () => {
   const out = (result) => process.stdout.write(JSON.stringify({ result, num_turns: 1, is_error: false, total_cost_usd: 0 }));
+  if (prompt.includes("FLOW-AUTO-STEP: analyze") && process.env.LEAKY) return out(JSON.stringify({ synthetic: "The engineer wrote: I said don't push it to the remote yet, and the agent pushed anyway.", rootCause: "No rule.", mechanism: "deterministic", kind: "deterministic" }));
   if (prompt.includes("FLOW-AUTO-STEP: analyze")) return out(JSON.stringify({ synthetic: "The engineer said not to push the branch; later in the session the agent pushed it anyway.", rootCause: "No constraint rule turns a stated no-push into a refusal.", mechanism: "deterministic", kind: "deterministic" }));
   if (prompt.includes("FLOW-AUTO-STEP: cases")) {
     const id = /cases\\/(auto-[a-z0-9-]+)\\//.exec(prompt)[1];
@@ -199,12 +203,21 @@ let prompt = ""; process.stdin.on("data", (d) => prompt += d).on("end", () => {
       const gh = readFileSync(ghLog, "utf8");
       assert.match(gh, /pr create .*--draft/);
       assert.doesNotMatch(gh, /I said don't push/, "engineer text never reaches GitHub");
+      // An analyzer that repeats the engineer's words is refused before anything runs: no proof, no PR.
+      const leakyHome = join(root, "store3");
+      mkdirSync(join(leakyHome, "queue/pending"), { recursive: true });
+      const leakyConfig = JSON.parse(readFileSync(join(home, "config.json"), "utf8"));
+      writeFileSync(join(leakyHome, "config.json"), JSON.stringify({ ...leakyConfig, autoLearn: { ...leakyConfig.autoLearn, cloneDir: join(root, "clone3") } }));
+      for (const s of ["s1", "s2"]) writeFileSync(join(leakyHome, "queue/pending", `e-${s}.json`), JSON.stringify({ id: `e-${s}`, type: "prompt", at: "2026-10-19T09:00:00Z", session: s, repo: "web", kind: "correction", category: "unauthorized-action", keys: ["push"], text: "I said don't push it to the remote yet", objective: null }));
+      const leaky = JSON.parse(spawnSync(process.execPath, [join(plugin, "learn/auto.mjs"), "--print"], { env: { ...env, FLOW_FEEDBACK_HOME: leakyHome, LEAKY: "1" }, encoding: "utf8", timeout: 300_000 }).stdout || "{}");
+      assert.equal(leaky.done?.[0]?.outcome, "refused-private", JSON.stringify(leaky));
+      assert.match(leaky.done[0].reasons.join(" "), /repeats the engineer's words/);
       assert.doesNotMatch(execFileSync("git", ["-C", bare, "log", "-1", "--format=%B", "flow-learn/unauthorized-action--push"], { encoding: "utf8" }), /I said don't push/);
       // A sloppy fix (a rule that refuses every git command) is rejected by the gate: no PR.
       const sloppyHome = join(root, "store2");
       mkdirSync(join(sloppyHome, "queue/pending"), { recursive: true });
       writeFileSync(join(sloppyHome, "config.json"), JSON.stringify({ ...JSON.parse(readFileSync(join(home, "config.json"), "utf8")), autoLearn: { ...JSON.parse(readFileSync(join(home, "config.json"), "utf8")).autoLearn, cloneDir: join(root, "clone2") } }));
-      for (const s of ["s1", "s2"]) writeFileSync(join(sloppyHome, "queue/pending", `e-${s}.json`), JSON.stringify({ id: `e-${s}`, type: "prompt", at: "2026-10-19T09:00:00Z", session: s, repo: "web", kind: "correction", category: "unauthorized-action", keys: ["push"], text: "I said don't push", objective: null }));
+      for (const s of ["s1", "s2"]) writeFileSync(join(sloppyHome, "queue/pending", `e-${s}.json`), JSON.stringify({ id: `e-${s}`, type: "prompt", at: "2026-10-19T09:00:00Z", session: s, repo: "web", kind: "correction", category: "unauthorized-action", keys: ["push"], text: "I said don't push it to the remote yet", objective: null }));
       const sloppy = JSON.parse(spawnSync(process.execPath, [join(plugin, "learn/auto.mjs"), "--print"], { env: { ...env, FLOW_FEEDBACK_HOME: sloppyHome, SLOPPY: "1" }, encoding: "utf8", timeout: 590_000 }).stdout || "{}");
       assert.equal(sloppy.done?.[0]?.outcome, "not-proven", JSON.stringify(sloppy));
       assert.equal(sloppy.done[0].url, undefined);

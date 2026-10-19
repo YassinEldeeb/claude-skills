@@ -28,6 +28,7 @@ try {
   const store = home().replace(/^\/Users\/[^/]+/, "~").toLowerCase();
   const reading = /^\s*(cat|less|head|tail|ls|stat|wc|grep|rg)\b[^;&|>`$]*$/.test(command);
   if ((lower.includes(".claude/flow-feedback") || lower.includes(store)) && !reading) block("Refused: changing flow's local feedback store. It is the engineer's record; only its CLI, run by the engineer, changes it.");
+  if (/\b(saveConfig|autoLearn)\b/.test(command)) block("Refused: changing flow's settings (auto-learn, capture) is the engineer's; tell them the command instead.");
   if (/\blearn\b/i.test(command) && /\bcli\.mjs["']?\s+(disable|enable|delete|auto\s+(on|off))\b/i.test(command)) block("Refused: flow-learn disable, enable, delete and auto on/off are the engineer's controls; tell them the command instead.");
   // Eval spend only with the engineer's approval this session ("approve spend up to $20"), recorded by the prompt hook.
   if (/--approve-spend\b/.test(command)) {

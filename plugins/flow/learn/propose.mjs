@@ -142,7 +142,7 @@ export function verifyEvidence({ dir, base, cluster, results }) {
 }
 
 /** Open or update the cluster's draft PR. repo: owner/name; dir: a checkout of the skills repo with the candidate. */
-export function propose({ dir, repo, base, cluster, rootCause, change, results, limits = { maxNewPrsPerDay: 2, maxOpenPrs: 5 } }) {
+export function propose({ dir, repo, base, prBase = base.replace(/^origin\//, ""), cluster, rootCause, change, results, limits = { maxNewPrsPerDay: 2, maxOpenPrs: 5 } }) {
   const evidence = verifyEvidence({ dir, base, cluster, results });
   if (evidence.problems.length) throw new Error(`not proposing: ${evidence.problems.join("; ")}`);
   const files = changedPaths(dir, base);
@@ -180,7 +180,7 @@ export function propose({ dir, repo, base, cluster, rootCause, change, results, 
       const labels = ["flow-learn", ...(isEnforcement(files) ? ["enforcement"] : [])];
       for (const label of labels) { try { gh(["label", "create", label, "--repo", repo, "--color", label === "enforcement" ? "B60205" : "5319E7", "--description", "flow learned improvement"], { cwd: dir }); } catch { /* exists */ } }
       const title = `flow-learn: ${cluster.category.replace(/[^a-z0-9-]/g, "")} (${String(cluster.key ?? "general").replace(/[^a-z0-9-]/g, "")})`;
-      url = gh(["pr", "create", "--repo", repo, "--draft", "--base", base.replace(/^origin\//, ""), "--head", branch, "--title", title, "--body-file", bodyFile, ...labels.flatMap((l) => ["--label", l])], { cwd: dir }).trim();
+      url = gh(["pr", "create", "--repo", repo, "--draft", "--base", prBase, "--head", branch, "--title", title, "--body-file", bodyFile, ...labels.flatMap((l) => ["--label", l])], { cwd: dir }).trim();
     }
     appendLog("ledger.jsonl", { at: new Date().toISOString(), cluster: cluster.id, state: "proposed", url, verdict: evidence.judgement?.verdict, files });
     return { url, files, body, commit };

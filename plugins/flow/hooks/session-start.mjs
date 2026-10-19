@@ -2,11 +2,12 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { FLOW_VERSION, approveLine, substantive } from "../gate/lib.mjs";
-import { newsSince } from "../learn/auto.mjs";
 import { captureAllowed, config, loadSession, safe, saveConfig, saveSession } from "../learn/store.mjs";
 import { activeConstraints, constraintRules, describeConstraints, repoFlowConfig, typedByEngineer } from "./capture.mjs";
 import { branchTasks, currentBranch, loadFlow, readInput, repoRoot } from "./common.mjs";
 
+let newsSince = () => null;
+try { if (config().autoLearn) ({ newsSince } = await import("../learn/auto.mjs")); } catch { /* fail open */ }
 try {
   const input = await readInput().catch(() => ({}));
   const root = repoRoot(input.cwd || process.env.CLAUDE_PROJECT_DIR || process.cwd());
@@ -28,7 +29,7 @@ try {
       saveConfig({ ...config(), noticeShown: new Date().toISOString() });
     }
     // What auto-learn did in the background, once per news item.
-    const news = newsSince(config().autoLearnShownAt ?? null);
+    const news = config().autoLearn ? newsSince(config().autoLearnShownAt ?? null) : null;
     if (news) { notice = notice ? `${notice}\n${news}` : news; saveConfig({ ...config(), autoLearnShownAt: new Date().toISOString() }); }
     saveSession(input.session_id, session);
     return lines;
