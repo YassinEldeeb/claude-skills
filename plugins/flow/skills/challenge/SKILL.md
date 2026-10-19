@@ -26,12 +26,12 @@ Working code for the wrong architecture is the most expensive outcome. This step
 | `e2eProof` | How will we prove it works end to end, against the real systems? |
 | `assumptions` | What could invalidate the whole plan? Each one is `verified` (with evidence) or `unverified` with what it blocks: `merge`, `rollout` or `none`. |
 
-**Medium work (the light version):** `simplest`, 2 `failureModes`, and, when a capacity signal fires, the §3 `capacity` block with `cut80`. Skip the rest of §2, the alternatives, §4 and §5 (medium has no spec approval), and return to `/flow:start`.
+**Medium work (the light version):** `simplest`, 2 `failureModes`, and, when a capacity signal fires (a rule with `capacity: true`), the §3 `capacity` block with `cut80`, at the top level of `task.json`, not inside `challenge`. Skip the rest of §2, the alternatives, §4 and §5 (medium has no spec approval), and return to `/flow:start`.
 
 ## 3. Alternatives and economics
 
 - `alternatives`: at least 2, including a simpler, incremental or on-demand option. Mark exactly one `chosen`, and say what each costs and drops.
-- `capacity`, when a capacity signal fires:
+- `capacity` (top level of `task.json`), when a capacity signal fires:
   - `workload.users`, `workload.workPerUser`, `latency.firstResult`, `cost.perUser`, plus any others that matter;
   - each number with `source: measured` (plus `ref` and `at`) or `estimate` (plus `basis`);
   - high work needs at least one measured workload number.

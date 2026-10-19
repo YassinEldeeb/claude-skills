@@ -25,11 +25,11 @@ That's the whole interface. flow sizes the risk (small / medium / high) and runs
 
 A typo ships with no ceremony. Later prompts on the same branch pick the task up where it is: you don't type `/flow:start` again, and flow never hands you a flow command to run, except an approval only you can give.
 
-**What it tells the agent to do on the way.** These steps are there to catch the expensive mistakes early. The first is measured; the rest are new instructions (see `docs/flow-2.2-design.md`):
+**What it tells the agent to do on the way.** These are instructions meant to catch the expensive mistakes early. They're checked only on small synthetic repos with a stand-in model client, not in production (results in `docs/flow-2.2-design.md`):
 
-- **Proves the risky part first** (measured: Sonnet ran the plan on real data before deciding in 5 of 8 runs, against 1 of 9 before). Before building broadly, it runs the shape it plans to build on a real sample (real data, production's model and settings), measures time and cost, and forecasts the whole workload against your target. A plan that misses comes back as plan B, before the code exists.
-- **Builds the thinnest real path next.** Input to output through the real system, with every outside dependency (other repos, flags, permissions, data access) wired and checked. One builder until that works.
-- **Shows you every round.** Each milestone ends with something you can see and the same three or fewer outcome numbers, in `.flow/tasks/<ID>/progress.md`.
+- **Proves the risky part first.** Before building broadly, it runs the shape it plans to build on a real sample (real data, production's model and settings), measures time and cost, and forecasts the whole workload against your target. A plan that misses comes back as plan B, before the code exists.
+- **Shows you a real result early.** Before broad work it names the smallest real example that exercises the risky part, and what you'll inspect: a before/after, an output, a screenshot, a command. It takes that one example through the real system first (every outside dependency wired and checked), aiming for a first checkpoint in 15 to 30 minutes. One builder until that works.
+- **Keeps a trail, keeps going.** Each checkpoint appends a short round to `.flow/tasks/<ID>/progress.md` (goal, artifact, result, the same three or fewer numbers, next). It tells you in a line and carries on; it doesn't ask whether to continue.
 - **Stops and rethinks.** The same kind of bug fixed twice, two rounds off-track, or a forecast that misses the deadline means no more code until there's a better plan.
 
 **Repos with their own release policy.** In a repo without the flow gate (no `.flow/config.json`), `/flow:start` runs the same steps, and the repo's written policy (AGENTS.md / CLAUDE.md) decides approvals and merges: if it already allows agents to merge when green, or to admin-merge, flow doesn't ask again. Install the gate only where you want human `spec@`/`ship@` approvals on high-risk work; with the gate installed, nothing merges past a red `flow` check, `--admin` included.
