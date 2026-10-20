@@ -22,7 +22,7 @@ globalThis.fetch = async () => {
   try {
     const mod = await import(pathToFileURL(dir + "/src/agent.js").href);
     const tool = (mod.TOOLS ?? {}).read_attachment;
-    const file = { id: "F1", name: "IMG_8645.png", mimetype: "image/png", url_private: "https://files.slack.com/files-pri/T1-F1/img_8645.png" };
+    const file = { id: "F1", name: "export-screenshot.png", mimetype: "image/png", url_private: "https://files.slack.com/files-pri/T1-F1/export-screenshot.png" };
     let result, threw = null;
     try { result = await mod.runTool("read_attachment", { file, ...file }); } catch (e) { threw = String(e && e.message || e); }
     const text = typeof result === "string" ? result : JSON.stringify(result ?? null);
