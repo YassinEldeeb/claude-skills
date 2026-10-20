@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { FLOW_VERSION, approveLine, substantive } from "../gate/lib.mjs";
 import { captureAllowed, config, loadSession, safe, saveConfig, saveSession } from "../learn/store.mjs";
+import { ensureCompactWindow } from "./compact-window.mjs";
 import { activeConstraints, constraintRules, describeConstraints, repoFlowConfig, typedByEngineer } from "./capture.mjs";
 import { branchTasks, currentBranch, loadFlow, readInput, repoRoot } from "./common.mjs";
 
@@ -29,6 +30,9 @@ try {
       notice = `[flow] flow records your corrections and session signals locally to improve its skills (redacted; nothing leaves this machine). To turn it off, run in your terminal: node "${cli}" disable (or set FLOW_FEEDBACK=off). Optional: type "flow auto-learn on" and, after a correction, flow tests a fix to its workflow in the background on your Claude plan and opens a draft PR (synthetic text only) when the fix is proven.`;
       saveConfig({ ...config(), noticeShown: new Date().toISOString() });
     }
+    // flow 2.4.4: Claude Code compacts by itself past 500k (autoCompactWindow), set once, instead of asking for /compact.
+    const compact = safe(() => ensureCompactWindow({ config, saveConfig }), null);
+    if (compact) notice = notice ? `${notice}\n${compact}` : compact;
     // What auto-learn did in the background, once per news item.
     const news = config().autoLearn ? newsSince(config().autoLearnShownAt ?? null) : null;
     if (news) { notice = notice ? `${notice}\n${news}` : news; saveConfig({ ...config(), autoLearnShownAt: new Date().toISOString() }); }

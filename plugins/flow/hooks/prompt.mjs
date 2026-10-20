@@ -1,5 +1,5 @@
 // UserPromptSubmit. Never blocks. Three jobs, one process:
-// 1. token warning (flow 2.0's context guard): idle past the cache TTL with a big context, or over 500k tokens;
+// 1. context note: once per session, only for a session over 500k that predates flow's autoCompactWindow (compact-window.mjs);
 // 2. session constraints the engineer states ("don't merge"): noted, then re-injected on every prompt;
 // 3. feedback capture (flow 2.1): a correction, praise or preference becomes a small redacted event in the local queue.
 // Fails open: any error lets the prompt through untouched.
@@ -7,41 +7,51 @@ import { closeSync, existsSync, openSync, readSync, statSync } from "node:fs";
 import { performance } from "node:perf_hooks";
 import { classifyPrompt, constraintChanges, isAutomated, ownWords, spendGrant } from "../learn/classify.mjs";
 import { appendLog, captureAllowed, clean, config, enqueue, loadSession, safe, saveConfig, saveSession } from "../learn/store.mjs";
+import { configuredWindow } from "./compact-window.mjs";
 import { PLUGIN_VERSION, constraintRules, describeConstraints, repoFlowConfig, repoOf, typedByEngineer } from "./capture.mjs";
 
-const TTL_MIN = Number(process.env.FLOW_CACHE_TTL_MIN) || 60;
-const BIG = 150_000, HUGE = 500_000;
+const HUGE = 500_000;
 
-function contextWarning(path) {
+// The session's context in tokens, from its last main-thread request (null when unknown).
+function contextTokens(path) {
   if (!path || !existsSync(path)) return null;
   const size = statSync(path).size, take = Math.min(size, 4 * 1024 * 1024);
   const buf = Buffer.alloc(take), fd = openSync(path, "r");
   readSync(fd, buf, 0, take, size - take);
   closeSync(fd);
-  let lastAt = 0, context = 0;
+  let context = null;
   for (const line of buf.toString("utf8").split("\n")) {
     if (!line.includes('"assistant"')) continue;
     try {
       const record = JSON.parse(line);
       const usage = record?.message?.usage;
       if (record.type !== "assistant" || !usage || record.isSidechain) continue;
-      lastAt = Date.parse(record.timestamp) || lastAt;
       context = (usage.input_tokens ?? 0) + (usage.cache_read_input_tokens ?? 0) + (usage.cache_creation_input_tokens ?? 0);
     } catch { /* skip a bad line */ }
   }
-  if (!lastAt) return null;
-  const k = Math.round(context / 1000), idleMin = Math.round((Date.now() - lastAt) / 60_000);
-  const notes = [];
-  if (idleMin > TTL_MIN && context > BIG) notes.push(`idle ${idleMin} min with ${k}k tokens of context: the prompt cache (TTL ${TTL_MIN} min) has likely expired, so this message re-reads all ${k}k. Before a long pause, write the state to the task and /compact.`);
-  if (context > HUGE) notes.push(`context is ${k}k tokens: past 500k every request costs more and quality drops. Write the state to files and /compact or start fresh.`);
-  return notes.length ? `[flow] ${notes.join(" ")}` : null;
+  return context;
+}
+
+// flow 2.4.4: Claude Code compacts by itself past autoCompactWindow (session start sets it to 500k once), so flow no
+// longer asks for /compact on every prompt. A session over 500k under such a window started before the setting
+// existed: say so once, since only a restart (or /compact) applies it. Otherwise the engineer chose; stay quiet.
+function contextNote(input) {
+  const context = contextTokens(input.transcript_path);
+  if (!(context > HUGE) || !input.session_id) return null;
+  const window = configuredWindow();
+  if (typeof window !== "number" || window > HUGE) return null;
+  const session = loadSession(input.session_id);
+  if (session.compactNoted) return null;
+  session.compactNoted = new Date().toISOString();
+  saveSession(input.session_id, session);
+  return `[flow] This session is at ${Math.round(context / 1000)}k tokens. Claude Code compacts sessions by itself past ${Math.round(window / 1000)}k, but this one started before that setting: /compact now, or reopen the session, and it applies.`;
 }
 
 try {
   let text = "";
   for await (const chunk of process.stdin) text += chunk;
   const input = JSON.parse(text);
-  const system = safe(() => contextWarning(input.transcript_path), null);
+  const system = safe(() => contextNote(input), null);
   const context = [];
   // No prompt text, nothing to record (and nothing to note or count).
   // The thread's /flow:start goal is remembered and repeated on every later prompt, so a "continue" after an

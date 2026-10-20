@@ -1,4 +1,5 @@
 // The hooks and the offline CLI commands, run as real processes against a throwaway git repo.
+import "./isolate.mjs";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -111,18 +112,96 @@ describe("session start and the context guard", () => {
     assert.match(r.stdout, /\/flow:start/);
   });
 
-  test("the context guard warns but never blocks", () => {
+  test("a big context no longer asks for /compact on every prompt; a session that predates the window hears it once", () => {
     const transcript = join(repo, "t.jsonl");
     const old = new Date(Date.now() - 3 * 60 * 60_000).toISOString();
-    writeFileSync(transcript, `${JSON.stringify({ type: "assistant", timestamp: old, message: { usage: { input_tokens: 10, cache_read_input_tokens: 600_000, cache_creation_input_tokens: 0 } } })}\n`);
-    const r = hook("prompt.mjs", { transcript_path: transcript, session_id: "s" });
-    assert.equal(r.status, 0);
-    const message = JSON.parse(r.stdout).systemMessage;
-    assert.match(message, /idle 180 min with 600k/);
-    assert.match(message, /past 500k/);
-    const fresh = new Date().toISOString();
-    writeFileSync(transcript, `${JSON.stringify({ type: "assistant", timestamp: fresh, message: { usage: { input_tokens: 10, cache_read_input_tokens: 20_000 } } })}\n`);
-    assert.equal(hook("prompt.mjs", { transcript_path: transcript }).stdout, "");
+    const usage = (tokens) => `${JSON.stringify({ type: "assistant", timestamp: old, message: { usage: { input_tokens: 10, cache_read_input_tokens: tokens, cache_creation_input_tokens: 0 } } })}\n`;
+    const settings = join(process.env.CLAUDE_CONFIG_DIR, "settings.json");
+    mkdirSync(process.env.CLAUDE_CONFIG_DIR, { recursive: true });
+    try {
+      // No window set (the engineer's own choice, or flow hasn't run session start yet): quiet, idle or not.
+      writeFileSync(transcript, usage(600_000));
+      const quiet = hook("prompt.mjs", { transcript_path: transcript, session_id: "ctx-1" });
+      assert.equal(quiet.status, 0);
+      assert.equal(quiet.stdout, "");
+      // A 500k window is set but this session is past it: it started before the setting. One line, once.
+      writeFileSync(settings, JSON.stringify({ autoCompactWindow: 500_000 }));
+      const first = hook("prompt.mjs", { transcript_path: transcript, session_id: "ctx-2" });
+      assert.match(JSON.parse(first.stdout).systemMessage, /at 600k tokens.*past 500k.*started before that setting/);
+      assert.equal(hook("prompt.mjs", { transcript_path: transcript, session_id: "ctx-2" }).stdout, "");
+      // A larger window the engineer chose, or a small context: nothing.
+      writeFileSync(settings, JSON.stringify({ autoCompactWindow: 900_000 }));
+      assert.equal(hook("prompt.mjs", { transcript_path: transcript, session_id: "ctx-3" }).stdout, "");
+      writeFileSync(settings, JSON.stringify({ autoCompactWindow: 500_000 }));
+      writeFileSync(transcript, usage(20_000));
+      assert.equal(hook("prompt.mjs", { transcript_path: transcript, session_id: "ctx-4" }).stdout, "");
+    } finally { rmSync(process.env.CLAUDE_CONFIG_DIR, { recursive: true, force: true }); }
+  });
+});
+
+describe("autoCompactWindow (flow 2.4.4)", () => {
+  // Each case: a fresh Claude config dir and a fresh flow store, an attended session start.
+  const start = (setup = () => {}, env = {}) => {
+    const dir = mkdtempSync(join(tmpdir(), "flow-acw-claude-")), store = mkdtempSync(join(tmpdir(), "flow-acw-store-"));
+    writeFileSync(join(store, "config.json"), JSON.stringify({ noticeShown: "x" }));
+    setup(dir, store);
+    const run = () => spawnSync("node", [join(plugin, "hooks", "session-start.mjs")], { input: JSON.stringify({ session_id: "s", cwd: repo, source: "startup" }), encoding: "utf8", env: { ...process.env, CLAUDE_CONFIG_DIR: dir, FLOW_FEEDBACK_HOME: store, CLAUDE_CODE_SESSION_ATTENDED: "1", ...env } });
+    const settings = () => { try { return readFileSync(join(dir, "settings.json"), "utf8"); } catch { return null; } };
+    return { dir, store, run, settings, done: () => { rmSync(dir, { recursive: true, force: true }); rmSync(store, { recursive: true, force: true }); } };
+  };
+
+  test("sets 500k once, keeps the engineer's other settings and indentation, and tells them", () => {
+    const c = start((dir) => writeFileSync(join(dir, "settings.json"), '{\n    "model": "opus",\n    "permissions": { "allow": ["Bash(ls)"] }\n}\n'));
+    try {
+      const r = c.run();
+      assert.equal(r.status, 0);
+      assert.match(JSON.parse(r.stdout).systemMessage, /compacts a session by itself as it nears 500k tokens/);
+      const after = c.settings();
+      assert.deepEqual(JSON.parse(after), { model: "opus", permissions: { allow: ["Bash(ls)"] }, autoCompactWindow: 500_000 });
+      assert.match(after, /\n {4}"model"/);
+      // Removed by the engineer: never set again, and no message.
+      writeFileSync(join(c.dir, "settings.json"), '{ "model": "opus" }\n');
+      const again = c.run();
+      assert.doesNotMatch(again.stdout, /autoCompactWindow/);
+      assert.equal(c.settings(), '{ "model": "opus" }\n');
+    } finally { c.done(); }
+  });
+
+  test("creates the settings file when the config dir has none", () => {
+    const c = start();
+    try {
+      c.run();
+      assert.deepEqual(JSON.parse(c.settings()), { autoCompactWindow: 500_000 });
+    } finally { c.done(); }
+  });
+
+  for (const [name, setup, env] of [
+    ["a window the engineer chose", (dir) => writeFileSync(join(dir, "settings.json"), '{"autoCompactWindow": 800000}')],
+    ["a per-model window", (dir) => writeFileSync(join(dir, "settings.json"), '{"modelOverrides": {"opus": {"autoCompactWindow": "auto"}}}')],
+    ["auto-compact turned off in settings", (dir) => writeFileSync(join(dir, "settings.json"), '{"autoCompactEnabled": false}')],
+    ["auto-compact turned off in /config", (dir) => { writeFileSync(join(dir, "settings.json"), "{}"); writeFileSync(join(dir, ".claude.json"), '{"autoCompactEnabled": false}'); }],
+    ["the window set in the environment", (dir) => writeFileSync(join(dir, "settings.json"), "{}"), { CLAUDE_CODE_AUTO_COMPACT_WINDOW: "700000" }],
+    ["compaction disabled in the environment", (dir) => writeFileSync(join(dir, "settings.json"), "{}"), { DISABLE_AUTO_COMPACT: "1" }],
+    ["a settings file that isn't valid JSON", (dir) => writeFileSync(join(dir, "settings.json"), '{"model": "opus",}')],
+  ]) {
+    test(`leaves the settings alone: ${name}`, () => {
+      const c = start(setup, env);
+      try {
+        const before = c.settings();
+        const r = c.run();
+        assert.equal(r.status, 0);
+        assert.equal(c.settings(), before);
+        assert.doesNotMatch(r.stdout, /compacts a session by itself/);
+      } finally { c.done(); }
+    });
+  }
+
+  test("an unattended (headless) session never touches the settings", () => {
+    const c = start((dir) => writeFileSync(join(dir, "settings.json"), "{}"), { CLAUDE_CODE_SESSION_ATTENDED: "0" });
+    try {
+      c.run();
+      assert.equal(c.settings(), "{}");
+    } finally { c.done(); }
   });
 });
 

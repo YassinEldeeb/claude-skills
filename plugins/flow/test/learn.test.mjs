@@ -1,4 +1,5 @@
 // flow 2.1 learning loop: capture, queue, worker, privacy, adversarial cases. Real hook processes, real files, no model calls.
+import "./isolate.mjs";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";

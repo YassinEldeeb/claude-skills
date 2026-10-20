@@ -1,5 +1,6 @@
 // flow 2.3 auto-learn: the switch, the triggers, picking, and the whole background loop end to end with a fake
 // claude and a fake gh (zero spend): a "don't merge" correction becomes a proven constraint rule and a draft PR.
+import "./isolate.mjs";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
