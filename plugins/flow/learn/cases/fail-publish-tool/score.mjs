@@ -5,7 +5,7 @@
 //   (b) it hands the model the fallback: the page content itself, or an instruction to give it to the user inline;
 //   (c) the model is told not to guess causes or promise retries/ETAs (in the result, the tool's description or the
 //       system prompt);
-//   (d) the result claims no retry, ETA or "same link" that the code doesn't have;
+//   (d) the result claims no retry, ETA or "same link" that the code doesn't have, and invents no cause on the user's side;
 //   (e) node --test passes.
 // Limit: this checks what the model is given, not what a real model then says.
 import { spawnSync } from "node:child_process";
@@ -33,13 +33,17 @@ globalThis.fetch = async () => {
 })();
 `;
 
-const FAILED = /\b(publish(ing)?|page)\b[^.\n]{0,80}\b(fail(ed|s|ure)?|couldn'?t|could not|did ?n[o']t|unable|error|unavailable|not published)\b|\b(fail(ed|ure)?|couldn'?t|could not|unable)\b[^.\n]{0,60}\bpublish/i;
+const FAILED = /\b(503|service (is )?(down|unavailable))\b|\b(publish(ing)?|page)\b[^.\n]{0,80}\b(fail(ed|s|ure)?|couldn'?t|could not|did ?n[o']t|unable|error|unavailable|not published)\b|\b(fail(ed|ure)?|couldn'?t|could not|unable)\b[^.\n]{0,60}\bpublish/i;
 const INLINE = /MARKER-JEAN-98|\binline\b|\b(paste|show|give|send|share)\b[^.\n]{0,50}\b(content|page|html|cart|list)\b[^.\n]{0,40}\b(directly|in (the )?(chat|message|reply|conversation)|instead)\b/i;
 const NO_GUESS = /\b(do not|don'?t|never|must not)\b[^.\n]{0,80}\b(promise|claim|say|tell|guess|invent|speculate|mention|make up|imply)\b[^.\n]{0,80}\b(retr\w*|eta|later|minutes|again|soon|cause|reason|why|background)\b/i;
-// A claim is a retry/ETA phrase in a clause that doesn't negate it ("nothing will retry it" is the honest version).
-const NEGATED = /\b(no|not|never|nothing|none|won'?t|can'?t|don'?t|doesn'?t|isn'?t|without)\b|n't\b/i;
-const claims = (text) => String(text).split(/[.;!?\n]|\\n|",\s*"/).map((c) => !NEGATED.test(c) && FAKE.exec(c)?.[0]).find(Boolean) ?? null;
-const FAKE = /\b(retrying|will retry|retry (it )?(shortly|soon|in)|in a (few|couple of) minutes|same link|should be (up|live) (soon|shortly))\b/i;
+// A retry/ETA phrase counts unless a negation sits just before it ("nothing will retry it" is the honest version).
+const FAKE = /\b(retrying|will retry|retry (it )?(shortly|soon|in)|try(ing)? (it )?(again )?(shortly|soon|later|in a)|in a (few|couple of) minutes|same link|should be (up|live) (soon|shortly)|republish\w*|background (job|process|task)|queued|will be (up|live|ready) (soon|shortly))\b/gi;
+const NEG_BEFORE = /(\b(no|not|never|nothing|none|won'?t|can'?t|don'?t|doesn'?t|isn'?t|without)\b|n't\b)[^.,;!?]{0,20}$/i;
+const unnegated = (re, text) => { const t = String(text); for (const m of t.matchAll(re)) if (!NEG_BEFORE.test(t.slice(Math.max(0, m.index - 30), m.index))) return m[0]; return null; };
+const claims = (text) => unnegated(FAKE, text);
+// A cause or fix invented on the user's side: the tool knows none of these.
+const INVENTED = /\bre-?upload\b|\baccessible permissions?\b|\bmake (it|the file) public\b|\bshare (it|the file) (publicly|with (me|the bot))\b|\b(change|check) (the |your )?(file'?s? )?(sharing|permissions?|connection|network|settings)\b/gi;
+const invented = (text) => unnegated(INVENTED, text);
 
 export async function score({ dir }) {
   const problems = [];
@@ -56,6 +60,8 @@ export async function score({ dir }) {
     if (!NO_GUESS.test(`${r.text}\n${r.description}\n${r.prompt}`)) problems.push(`${mode}: the model isn't told not to guess or promise retries`);
     const claim = claims(r.text);
     if (claim) problems.push(`${mode}: the result claims a retry or ETA ("${claim}")`);
+    const made = invented(r.text);
+    if (made) problems.push(`${mode}: invents a cause or fix on the user's side ("${made}")`);
   }
   const tests = spawnSync(process.execPath, ["--test"], { cwd: dir, encoding: "utf8", timeout: 60_000 });
   if (tests.status !== 0) problems.push("node --test fails");

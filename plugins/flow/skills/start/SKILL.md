@@ -25,7 +25,7 @@ Read the relevant code, recent PRs, logs and data. For a bug, find the first cau
 
 | Tier | Steps, all run by you | Human |
 |---|---|---|
-| Small | Reproduce → fix → test → PR with a `## Evidence` section. No task. | None |
+| Small | Reproduce → fix → test (the likeliest failure too) → PR with a `## Evidence` section. No task. | None |
 | Medium | Task → prove it first (§5) → `/flow:challenge` (light) → `/flow:build` → `/flow:verify` → `/flow:ship` | None, unless you need an override or a 🔴 decision |
 | High | Production evidence → task → prove it first (§5) → `/flow:challenge` → draft PR with only the spec → **checkpoint 1** → `flow.mjs sync` → `/flow:build` → `/flow:verify` → `/flow:ship` (**checkpoint 3**) | `spec@` before code, `ship@` before merge |
 
@@ -42,7 +42,7 @@ Create `.flow/tasks/<ID>/task.json`. The shape is in `../../templates/task.examp
   - **functional:** what must happen.
   - **safety:** what must never happen, for example "an older task never resurrects a forgotten fact". High work needs at least one. A critical one is verified by integration, e2e, failure_injection or eval, never by unit tests alone.
   - **operational:** latency, cost or reliability under representative load. Anything that processes a workload gets one, with the target from the outcome.
-- **failure paths:** list every boundary the change crosses (network or API call, database write, queue, file, third-party or model/tool call, auth) and how each can fail: timeout, error response, rate limit, partial write, empty or malformed input, duplicate run. For each, decide the behavior: retry (real backoff and a limit), fallback, fail loudly, or tell the user. Each decision is a criterion (`verify: failure_injection`); the likely ones are `critical`. "It'll probably be fine" is not a decision. In an agent or LLM product, a failed tool returns a clear, specific result to the model (what failed, whether retrying can help, what the user can do) with an instruction not to guess causes or promise retries or ETAs the system doesn't have; otherwise the model fills the gap with something plausible and false.
+- **failure paths:** list every boundary the change crosses (network or API call, database write, queue, file, third-party or model/tool call, auth) and how each can fail: timeout, error response, rate limit, partial write, empty or malformed input, duplicate run. For each, decide the behavior: retry (real backoff and a limit), fallback, fail loudly, or tell the user. Each decision is a criterion (kind `functional`, or `safety` for what must never happen; `verify: failure_injection`; `critical` for the likely ones); if the repo has no CI check for `failure_injection` tests (`config.verify.failure_injection.checks`), add one or prove it with `integration`, never `unit` or `manual`. "It'll probably be fine" is not a decision. In an agent or LLM product, a failed tool returns a clear, specific result to the model (what failed, whether retrying can help, what the user can do) with an instruction not to guess causes or promise retries or ETAs the system doesn't have.
 - **decisions:** 🔴 questions with your recommended option. The gate blocks until `chosen` holds what the human decided.
 - **branch, pr:** set them, so the hooks and `flow status` find the task.
 - **log:** 🟡 notes ("decided X because Y"); not part of the approved spec.
