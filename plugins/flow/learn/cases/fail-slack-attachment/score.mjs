@@ -35,12 +35,12 @@ globalThis.fetch = async () => {
 
 const CANT = /\b(can'?t|cannot|could ?n[o']t|unable to|not able to|isn'?t able|fail(ed)?( to)?)\b[^.\n]{0,60}\b(read|open|see|view|access|download)\b|\b(attachment|file|image|screenshot)s?\b[^.\n]{0,60}\b(unreadable|not (readable|supported|available))\b/i;
 const ASK = /\b(describe|description|paste|type out|copy (the )?text)\b/i;
-const NO_GUESS = /\b(do not|don'?t|never|must not)\b[^.\n]{0,80}\b(promise|claim|say|tell|guess|invent|speculate|mention|make up|imply|suggest)\b[^.\n]{0,80}\b(retr\w*|eta|later|minutes|again|soon|cause|reason|why|permission|re-?upload|fix)\b/i;
+const NO_GUESS = /\b(do not|don'?t|never|must not)\b[^.\n]{0,80}\b(promise|claim|say|tell|guess|invent|speculate|mention|make up|imply|suggest)\b[^.\n]{0,80}\b(retr\w*|eta|later|minutes|again|soon|cause|reason|why|what|content\w*|contain\w*|permission|re-?upload|fix)\b/i;
 // A retry/ETA phrase counts unless a negation sits just before it ("nothing will retry it" is the honest version).
 const FAKE = /\b(retrying|will retry|retry (it )?(shortly|soon|in)|try(ing)? (it )?(again )?(shortly|soon|later|in a)|in a (few|couple of) minutes|same link|should be (up|live) (soon|shortly)|republish\w*|background (job|process|task)|queued|will be (up|live|ready) (soon|shortly))\b/gi;
 const NEG_BEFORE = /(\b(no|not|never|nothing|none|won'?t|can'?t|don'?t|doesn'?t|isn'?t|without)\b|n't\b)[^.,;!?]{0,20}$/i;
 // ... or just after it ("Retrying cannot help").
-const NEG_AFTER = /^[^.,;!?]{0,12}\b(cannot|can'?t|won'?t|will not|doesn'?t|does not|isn'?t|is not|not)\b/i;
+const NEG_AFTER = /^[^.,;!?]{0,12}\b(cannot|can'?t|won'?t|will not|doesn'?t|does not|isn'?t|is not|not|unlikely)\b/i;
 const unnegated = (re, text) => { const t = String(text); for (const m of t.matchAll(re)) if (!NEG_BEFORE.test(t.slice(Math.max(0, m.index - 30), m.index)) && !NEG_AFTER.test(t.slice(m.index + m[0].length, m.index + m[0].length + 40))) return m[0]; return null; };
 const claims = (text) => unnegated(FAKE, text);
 // A cause or fix invented on the user's side: the tool knows none of these.
