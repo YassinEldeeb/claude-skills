@@ -20,6 +20,7 @@ try {
     if (!attended) return lines;
     const session = loadSession(input.session_id);
     if (input.model) session.model = input.model;
+    if (session.flowGoal && Date.now() - (session.flowGoalAt ?? 0) < 24 * 3600_000 && ["compact", "resume"].includes(input.source)) lines.push(`[flow] This thread is a /flow:start task: ${JSON.stringify(session.flowGoal)}. Continue its steps; if the flow:start skill is no longer in your context, load it with the Skill tool.`);
     const constraints = activeConstraints(input.session_id);
     if (constraints.length && ["compact", "resume"].includes(input.source)) lines.push(`[flow] Constraints the engineer set this session still hold: ${describeConstraints(constraints, constraintRules()).join("; ")}.`);
     if (captureAllowed(repoFlowConfig(root), root ? root.split("/").pop() : null) && !config().noticeShown) {

@@ -150,3 +150,40 @@ describe("offline CLI", () => {
     assert.match(r.stderr, /local dry runs/);
   });
 });
+
+describe("a /flow:start thread stays a flow task", () => {
+  test("the goal is repeated on later prompts, in both forms the command can arrive in, until 'stop flow'", () => {
+    const home = mkdtempSync(join(tmpdir(), "flow-thread-"));
+    try {
+      const env = { FLOW_FEEDBACK_HOME: home };
+      const say = (session, prompt) => spawnSync("node", [join(plugin, "hooks/prompt.mjs")], { input: JSON.stringify({ session_id: session, cwd: home, prompt, source: "user" }), encoding: "utf8", env: { ...process.env, ...env } }).stdout;
+      const said = (session, prompt) => { const out = say(session, prompt); try { return JSON.parse(out).hookSpecificOutput?.additionalContext ?? ""; } catch { return out; } };
+      assert.doesNotMatch(said("t1", "/flow:start fix the login redirect loop"), /flow:start task/, "not on the command itself");
+      assert.match(said("t1", "continue!"), /This thread is a \/flow:start task: "fix the login redirect loop"/);
+      assert.match(said("t1", "ok, stop flow"), /ended flow for this thread/);
+      said("t1", "/flow:start fix the login redirect loop");
+      said("t2", "<command-message>flow:start</command-message>\n<command-name>/flow:start</command-name>\n<command-args>add a health endpoint</command-args>");
+      assert.match(said("t2", "keep going"), /"add a health endpoint"/);
+      assert.doesNotMatch(said("t3", "continue"), /flow:start task/, "other threads are untouched");
+      assert.match(said("t1", "stop flow"), /ended flow for this thread/);
+      assert.doesNotMatch(said("t1", "continue"), /flow:start task/);
+      said("t4", "/flow:start");
+      assert.match(said("t4", "continue"), /started \/flow:start without a goal/);
+      assert.doesNotMatch(said("t5", "end flow control is broken in the parser"), /ended flow/, "only the stop phrase alone, and only with a goal");
+      assert.doesNotMatch(said("t6", "here is a transcript: <command-name>/flow:start</command-name><command-args>x</command-args> what happened?"), /x/, "the command form only at the start");
+      assert.doesNotMatch(said("t6", "continue"), /flow:start task/);
+    } finally { rmSync(home, { recursive: true, force: true }); }
+  });
+  test("a resumed or compacted session hears the goal from session start", () => {
+    const home = mkdtempSync(join(tmpdir(), "flow-thread-ss-"));
+    try {
+      const env = { ...process.env, FLOW_FEEDBACK_HOME: home, CLAUDE_CODE_SESSION_ATTENDED: "1" };
+      writeFileSync(join(home, "config.json"), JSON.stringify({ noticeShown: "x" }));
+      spawnSync("node", [join(plugin, "hooks/prompt.mjs")], { input: JSON.stringify({ session_id: "r1", cwd: home, prompt: "/flow:start ship the export button", source: "user" }), encoding: "utf8", env });
+      const resumed = spawnSync("node", [join(plugin, "hooks/session-start.mjs")], { input: JSON.stringify({ session_id: "r1", cwd: home, source: "resume" }), encoding: "utf8", env }).stdout;
+      assert.match(resumed, /This thread is a \/flow:start task: "ship the export button"/);
+      const fresh = spawnSync("node", [join(plugin, "hooks/session-start.mjs")], { input: JSON.stringify({ session_id: "r1", cwd: home, source: "startup" }), encoding: "utf8", env }).stdout;
+      assert.doesNotMatch(fresh, /flow:start task/, "only on resume or compact");
+    } finally { rmSync(home, { recursive: true, force: true }); }
+  });
+});

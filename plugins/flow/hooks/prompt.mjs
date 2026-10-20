@@ -44,6 +44,35 @@ try {
   const system = safe(() => contextWarning(input.transcript_path), null);
   const context = [];
   // No prompt text, nothing to record (and nothing to note or count).
+  // The thread's /flow:start goal is remembered and repeated on every later prompt, so a "continue" after an
+  // interruption or a restart keeps following flow (it used to drop it unless told "use flow" again).
+  if (typeof input.prompt === "string" && input.session_id && typedByEngineer(input)) safe(() => {
+    const raw = input.prompt;
+    const started = /^\s*\/flow:start(?=\s|$)([\s\S]*)$/.exec(raw)
+      ?? /^\s*(?:<command-message>[^<]*<\/command-message>\s*)?<command-name>\/flow:start<\/command-name>(?:\s*<command-args>([\s\S]*?)<\/command-args>)?/.exec(raw);
+    const session = loadSession(input.session_id);
+    const fresh = session.flowGoal != null && Date.now() - (session.flowGoalAt ?? 0) < 24 * 3600_000;
+    if (started) {
+      session.flowGoal = clean(ownWords(started[1] ?? "").trim(), 200) ?? "";
+      session.flowGoalAt = Date.now();
+      saveSession(input.session_id, session);
+    } else if (/^\s*(ok,?\s*)?(stop|end|exit|drop|leave|pause|quit)\s+(using\s+)?flow\s*[.!]*\s*$/i.test(raw)) {
+      if (session.flowGoal != null) {
+        delete session.flowGoal; delete session.flowGoalAt;
+        saveSession(input.session_id, session);
+        context.push("[flow] The engineer ended flow for this thread.");
+      }
+    } else if (fresh) {
+      session.flowGoalAt = Date.now();
+      saveSession(input.session_id, session);
+      context.push(session.flowGoal
+        ? `[flow] This thread is a /flow:start task: ${JSON.stringify(session.flowGoal)}. Keep running its steps; if the flow:start skill is no longer in your context, load it with the Skill tool. ("stop flow" ends it.)`
+        : "[flow] This thread started /flow:start without a goal. If this message gives the goal, run flow's steps on it (load the flow:start skill with the Skill tool); otherwise answer normally.");
+    } else if (session.flowGoal != null) {
+      delete session.flowGoal; delete session.flowGoalAt;
+      saveSession(input.session_id, session);
+    }
+  });
   // Pasted blocks are someone else's words: they never grant spend, set constraints or count as corrections.
   const own = typeof input.prompt === "string" ? ownWords(input.prompt) : "";
   const human = own.trim() !== "" && typedByEngineer(input) && !isAutomated(own);
