@@ -1,4 +1,32 @@
 {
   "_doc": "Session constraints an engineer states in a prompt ('don't merge'), enforced by guard-bash.mjs while active (best effort; GitHub's required checks are the hard layer). A rule only ever restricts. phrases start it, release lifts it (both matched on engineer prompts only), blocks are Bash patterns refused while it is active, allow are exceptions. Changes arrive as reviewed flow-learn PRs labelled 'enforcement'.",
-  "rules": []
+  "rules": [
+    {
+      "id": "verify-before-report",
+      "why": "do not tell anyone the work is done, fixed or recorded until a test, build or check has passed after your last edit; run it first and put its result in the report (for example \"npm test: 42 passed, 0 failed\")",
+      "covers": [
+        "report"
+      ],
+      "phrases": [
+        "\\b(don'?t|do not|never|stop)\\b[^.?!]{0,40}\\b(say|saying|claim|claiming|report|reporting|tell me|announce)\\b[^.?!]{0,40}\\b(done|fixed|complete|working)\\b",
+        "\\bverify (it )?before (you )?(report|claim|say)",
+        "\\bprove (to me )?(that )?(it'?s|it is|it'?ll|that it) ?(done|fixed|working|passing)\\b|\\bprove it (works|passes)\\b",
+        "\\bshow me (the )?(test|build|check) (output|results?) before\\b"
+      ],
+      "release": [
+        "\\bno need to (verify|re-?run)\\b",
+        "\\bskip (the )?verification\\b"
+      ],
+      "blocks": [
+        "\\b(gh\\s+(pr|issue)\\s+(comment|review|edit)|gh\\s+api\\b[^\\n]{0,200}comments|tmux\\s+send-keys|curl\\b[^\\n]{0,200}(-X\\s*POST|\\s-d\\b))[\\s\\S]{0,2000}\\b(done|fixed|complete[d]?|resolved|finished|implemented|landed|recorded|working|ready|addressed|passing)\\b",
+        "^\\s*(echo|printf)\\b[\\s\\S]{0,300}\\b(done|fixed|complete[d]?|resolved|finished|implemented|landed|recorded|working|ready|addressed|passing)\\b[\\s\\S]{0,300}(>>?|\\btee\\b)\\s*(-a\\s+)?\\S*(status|checkpoint|report)[\\w./-]*?(?<!\\.json)(?=[\\s;|&<]|$)",
+        "\\bcat\\b[^\\n]{0,40}>>?\\s*\\S*(status|checkpoint|report)[\\w./-]*?(?<!\\.json)(?=[\\s;|&<]|$)\\s*<<[\\s\\S]{0,2000}\\b(done|fixed|complete[d]?|resolved|finished|implemented|landed|recorded|working|ready|addressed|passing)\\b"
+      ],
+      "allow": [
+        "\\b\\d+\\s*(/\\s*\\d+\\s*)?(tests?|specs?|checks?|cases?)\\b[^.\\n\"]{0,30}\\b(pass(ed|ing)?|green|ok)\\b",
+        "\\b(tests?|ci|build|checks?|typecheck|lint)\\s+(is\\s+|are\\s+|all\\s+)?(green|passed|passing)\\b",
+        "\\b\\d+\\s+pass(ed|ing)?\\b[^.\\n\"]{0,20}\\b0\\s+fail"
+      ]
+    }
+  ]
 }
