@@ -22,7 +22,7 @@ Hooks (best effort, Claude Code only):
 - **SessionStart:** also fires after `/compact`. Names the branch's task, whether its code is held, its open 🔴 decisions, and a gate version mismatch.
 - **PreToolUse Edit/Write:** holds code edits of a high task until its approved spec is synced (`flow sync`). Routes an edit that trips a high rule no task lists through `/flow:start`. Refuses writes to approval records.
 - **PreToolUse Bash:** refuses posting or signing approvals, writing approval records, `--admin` merges, and changes to protection, rulesets, environments or Actions permissions.
-- **UserPromptSubmit:** a non-blocking token warning (idle past `FLOW_CACHE_TTL_MIN` with a big context; over 500k).
+- **UserPromptSubmit:** a non-blocking token warning (idle past `FLOW_CACHE_TTL_MIN` with a big context; over 500k). Replaced in 2.4.4: session start sets Claude Code's `autoCompactWindow` to 500k once, so sessions compact by themselves.
 
 ## 2. Gap analysis of 1.1 (by priority)
 
@@ -67,7 +67,7 @@ Bypass resistance: **H** = needs a human's GitHub identity or signing key, or re
 | Parallel work integrates | Dependency = its merged PR whose body names it; combined evidence; deploy plan | H (merge order), M (evidence) | `S4` |
 | Outcome-based status | Stages only from checks, merge state, deployments and approvals; unknown ≠ pass | H (no agent-typed stages) | `S5` |
 | No self-authorization in the session | Bash and edit hooks | L | `self-authorization guard` (12) |
-| Token economy | Non-blocking guard; cheaper models for chores in the skills | L | `the context guard warns but never blocks` |
+| Token economy | Non-blocking guard; cheaper models for chores in the skills | L | `a big context no longer asks for /compact on every prompt` (2.4.4) |
 
 Each protection was also checked by mutation: disabling it turns at least one test red. 19 protections were checked: edited comments, agent logins, unscanned files, skipped lines and skipped blocks, the dependency's merge, unit tests for safety, removed lines, the tier floor on the protected branch, the gold set's location, the ship hash, unapproved waivers, posting for skipped PRs, path safety, cited old tasks, last-line verdicts, kinds without CI checks, workflows as gate changes, and blocker escaping.
 

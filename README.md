@@ -33,6 +33,8 @@ A typo ships with no ceremony. Later prompts on the same branch pick the task up
 - **Designs the failure paths.** Every boundary's failures (timeouts, errors, rate limits, partial writes, bad input, duplicate runs) get a decided behavior that is tested before done, and in agent products the model is told exactly what failed, so it doesn't improvise "retrying in a few minutes". The final report has a failure → handling → tested table.
 - **Stops and rethinks.** The same kind of bug fixed twice, two rounds off-track, or a forecast that misses the deadline means no more code until there's a better plan.
 
+**Long sessions compact by themselves.** Once, in a session you're attending, flow sets Claude Code's `autoCompactWindow` to 500k in your user settings (a plugin can't set it any other way), so a session compacts itself as it nears 500k tokens (Claude Code starts about 20k early) instead of you being told to run `/compact`. It never overrides a window you chose or turns compaction back on, never sets it again if you remove it, and says so when it sets it. Change it with `/autocompact`. On a model with a smaller context than that, Claude Code's own window applies.
+
 **Repos with their own release policy.** In a repo without the flow gate (no `.flow/config.json`), `/flow:start` runs the same steps, and the repo's written policy (AGENTS.md / CLAUDE.md) decides approvals and merges: if it already allows agents to merge when green, or to admin-merge, flow doesn't ask again. Install the gate only where you want human `spec@`/`ship@` approvals on high-risk work; with the gate installed, nothing merges past a red `flow` check and agents never use `--admin`.
 
 Other commands, when you want them:

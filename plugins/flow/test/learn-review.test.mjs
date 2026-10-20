@@ -1,4 +1,5 @@
 // The adversarial review's attacks on flow 2.1, each reproduced and shown to fail now. No model calls.
+import "./isolate.mjs";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";

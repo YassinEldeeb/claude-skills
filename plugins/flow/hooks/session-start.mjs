@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { FLOW_VERSION, approveLine, substantive } from "../gate/lib.mjs";
 import { captureAllowed, config, loadSession, safe, saveConfig, saveSession } from "../learn/store.mjs";
+import { ensureCompactWindow } from "./compact-window.mjs";
 import { activeConstraints, constraintRules, describeConstraints, repoFlowConfig, typedByEngineer } from "./capture.mjs";
 import { branchTasks, currentBranch, loadFlow, readInput, repoRoot } from "./common.mjs";
 
@@ -35,6 +36,10 @@ try {
     saveSession(input.session_id, session);
     return lines;
   }, []);
+  // flow 2.4.4: Claude Code compacts by itself near 500k (autoCompactWindow), set once in an attended session,
+  // instead of asking for /compact. Not tied to feedback capture: FLOW_FEEDBACK=off doesn't turn this off.
+  const compact = safe(() => ensureCompactWindow({ config, saveConfig }), null);
+  if (compact) notice = notice ? `${notice}\n${compact}` : compact;
   const flow = loadFlow(root);
   const emit = (lines) => {
     if (notice) process.stdout.write(JSON.stringify({ systemMessage: notice, ...(lines.length ? { hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: lines.join("\n") } } : {}) }));
