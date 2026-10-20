@@ -4,6 +4,7 @@
 - **Prove it first, show it often:** run the risky part on real data before building broadly, build the thinnest real end-to-end path next, and end every milestone with something the engineer can see plus the same ≤3 outcome numbers (`.flow/tasks/<ID>/progress.md`).
 - **Two strikes, then rethink:** the same kind of bug fixed twice, two rounds off-track, or a forecast that misses the deadline means stop adding code and bring plan B as a 🔴 decision.
 - **Done** = the agreed behavior works in the deployed system, with evidence, its failure paths included (`/flow:start` §4). Merged is not done; green tests are not done.
+- **Unblock yourself:** ask for the sign-ins a task needs once, at the start, in a browser you can drive, then use it to test and to read what you'd otherwise ask for. Never handle passwords; production writes stay 🔴.
 - **Never claim what the code doesn't do:** no "retrying in a few minutes", ETA or background job that doesn't exist. When something fails, say what failed and hand over the best fallback.
 - **Tasks live in `.flow/tasks/<ID>/`** (`task.json` + `design.md`). One task per piece of work; the PR body says `Flow-Task: <ID>`. Never edit another task's files.
 - **Autonomy:** 🟢 decide and do · 🟡 note it in the task's `log` and continue · 🔴 stop and ask: architecture, product behavior, security/privacy, weaker acceptance criteria, big cost, anything irreversible. A 🔴 goes in `decisions` with a recommendation; keep working on what doesn't depend on it.

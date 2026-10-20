@@ -1,0 +1,1 @@
+Fixed: an empty cart threw (reduce had no start value). Please sign in to the Checkout dashboard (https://grafana.example.com/d/checkout) in the browser I can drive, and I'll read the error rate there.

@@ -18,6 +18,7 @@ user-invocable: false
   - the test exercises the real path, not a mock of the thing being tested;
   - integration and failure-injection tests talk to the real service, or to a fake proven as strict;
   - critical safety invariants are tested by breaking things (a killed commit, a failed publish, a retry, an old task replayed).
+- **The real UI:** when the change shows up in a page or an app, check it there too, in the signed-in browser you can drive, not only in tests.
 - **Failure paths:** trigger the 2-3 most likely failures for real (kill or fake the dependency, time it out, feed bad input, run it twice) and check the behavior is the one the task decided. What the user sees says what failed and whether anything changed, and gives the best fallback (the content inline, the next step); it never claims a retry, ETA or background process the code doesn't have. In an agent product, check what the model receives when a tool fails (`/flow:start` §4).
 - **Blast radius:** who else uses the touched code, and the second- and third-order effects.
 - **Privacy and security.**
