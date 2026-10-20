@@ -25,4 +25,4 @@ user-invocable: false
 7. **Verify live:** run the canary criteria and record their evidence. Before widening a rollout, run `node .github/flow/flow.mjs rollout-ok --pr <N>`. It refuses while an assumption marked `blocks: rollout` is unverified.
 8. **Watch** errors and metrics after the deploy. If things are worse, propose a rollback and wait, unless the human pre-authorized one.
 
-Report in 3 lines, as outcomes: what's built, tested, integrated, merged, deployed and verified (with proof); what's waiting on whom; what's next.
+Report in 3 lines, as outcomes: what's built, tested, integrated, merged, deployed and verified (with proof); what's waiting on whom; what's next. Then the failure paths, one row each: failure → handling → tested (y/n). An `n` means not done, unless the engineer accepts it; name the one risk they need to decide, if any.

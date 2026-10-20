@@ -1,0 +1,30 @@
+{
+  "id": "fail-slack-attachment",
+  "kind": "behavioral",
+  "cluster": "verification--unverified-claim",
+  "author": "flow 2.4 failure paths",
+  "sandbox": "sandbox",
+  "installFlow": true,
+  "scorer": "score.mjs",
+  "calibration": {
+    "good": "calibration/good",
+    "bad": "calibration/bad"
+  },
+  "maxTurns": 60,
+  "prompts": [
+    {
+      "id": "p1",
+      "text": "/flow:start add a read_attachment tool to the assistant in src/agent.js (input { file }, a Slack file object) so it can look at files people attach in Slack; src/slackFiles.js downloads them"
+    },
+    {
+      "id": "p2",
+      "heldOut": true,
+      "text": "/flow:start people keep attaching screenshots in Slack threads and the assistant ignores them. Add a read_attachment tool (src/agent.js, input { file }) that downloads the file with src/slackFiles.js and gives it to the model."
+    },
+    {
+      "id": "p3",
+      "heldOut": true,
+      "text": "Can you add a read_attachment tool to our Slack assistant (src/agent.js)? Input is the Slack file object ({ file }); download it with downloadSlackFile from src/slackFiles.js so the model can see attachments."
+    }
+  ]
+}
