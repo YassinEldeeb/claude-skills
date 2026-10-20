@@ -1,5 +1,6 @@
 ---
 name: start
+argument-hint: "<goal>"
 description: Use for any non-trivial task in a repo that has .flow/config.json (a feature, a bug fix, an integration, a job), for /flow:start <goal>, and to continue a flow task on the branch. The one entry point of flow - it classifies the risk, then runs every step itself (prove the risky part first, the shortest real path, verify, ship) and comes back only at a human checkpoint or when it's done.
 ---
 
@@ -106,4 +107,6 @@ Everything else is yours to decide.
 
 ## Keep going
 
-Before you end a turn, the task is at checkpoint 1, 2 or 3 or a 🔴 decision (one ready-to-paste ask, and you keep doing what doesn't depend on it), waiting on something outside the session (name it), or done (deployed and verified, or the PR open with the one thing blocking the rest named). A round is not a stop. Otherwise, continue. Stop at once when the engineer says stop or pause; answer a question about something else, then resume the task unless told not to. A later prompt about this task resumes it from `progress.md` and `flow.mjs status <ID>`.
+No goal came with the command: use the goal stated in this thread; if there is none, ask for it in one line and stop, without exploring the repo first. An interrupted or killed tool call (exit 137, "the session ended before this call's result was recorded") is never a reason to end the turn: re-run what you need and go on, and never answer "No response requested." while the task is open.
+
+Before you end a turn, the task is waiting for its goal, at checkpoint 1, 2 or 3 or a 🔴 decision (one ready-to-paste ask, and you keep doing what doesn't depend on it), waiting on something outside the session (name it), or done (deployed and verified, or the PR open with the one thing blocking the rest named). A round is not a stop. Otherwise, continue. Stop at once when the engineer says stop or pause; answer a question about something else, then resume the task unless told not to. A later prompt about this task resumes it from `progress.md` and `flow.mjs status <ID>`.
