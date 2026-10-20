@@ -30,15 +30,16 @@ try {
       notice = `[flow] flow records your corrections and session signals locally to improve its skills (redacted; nothing leaves this machine). To turn it off, run in your terminal: node "${cli}" disable (or set FLOW_FEEDBACK=off). Optional: type "flow auto-learn on" and, after a correction, flow tests a fix to its workflow in the background on your Claude plan and opens a draft PR (synthetic text only) when the fix is proven.`;
       saveConfig({ ...config(), noticeShown: new Date().toISOString() });
     }
-    // flow 2.4.4: Claude Code compacts by itself past 500k (autoCompactWindow), set once, instead of asking for /compact.
-    const compact = safe(() => ensureCompactWindow({ config, saveConfig }), null);
-    if (compact) notice = notice ? `${notice}\n${compact}` : compact;
     // What auto-learn did in the background, once per news item.
     const news = config().autoLearn ? newsSince(config().autoLearnShownAt ?? null) : null;
     if (news) { notice = notice ? `${notice}\n${news}` : news; saveConfig({ ...config(), autoLearnShownAt: new Date().toISOString() }); }
     saveSession(input.session_id, session);
     return lines;
   }, []);
+  // flow 2.4.4: Claude Code compacts by itself near 500k (autoCompactWindow), set once in an attended session,
+  // instead of asking for /compact. Not tied to feedback capture: FLOW_FEEDBACK=off doesn't turn this off.
+  const compact = safe(() => ensureCompactWindow({ config, saveConfig }), null);
+  if (compact) notice = notice ? `${notice}\n${compact}` : compact;
   const flow = loadFlow(root);
   const emit = (lines) => {
     if (notice) process.stdout.write(JSON.stringify({ systemMessage: notice, ...(lines.length ? { hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: lines.join("\n") } } : {}) }));

@@ -6,4 +6,4 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 process.env.CLAUDE_CONFIG_DIR = join(mkdtempSync(join(tmpdir(), "flow-test-claude-")), "absent");
-delete process.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW;
+for (const name of ["CLAUDE_CODE_AUTO_COMPACT_WINDOW", "DISABLE_COMPACT", "DISABLE_AUTO_COMPACT"]) delete process.env[name];

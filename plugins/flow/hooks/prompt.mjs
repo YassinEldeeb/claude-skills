@@ -21,6 +21,8 @@ function contextTokens(path) {
   closeSync(fd);
   let context = null;
   for (const line of buf.toString("utf8").split("\n")) {
+    // After a compaction the last request's size is stale until the next reply: unknown, not big.
+    if (line.includes('"compact_boundary"')) { context = null; continue; }
     if (!line.includes('"assistant"')) continue;
     try {
       const record = JSON.parse(line);
@@ -36,6 +38,7 @@ function contextTokens(path) {
 // longer asks for /compact on every prompt. A session over 500k under such a window started before the setting
 // existed: say so once, since only a restart (or /compact) applies it. Otherwise the engineer chose; stay quiet.
 function contextNote(input) {
+  if (process.env.CLAUDE_CODE_SESSION_ATTENDED !== "1") return null;
   const context = contextTokens(input.transcript_path);
   if (!(context > HUGE) || !input.session_id) return null;
   const window = configuredWindow();
@@ -44,7 +47,7 @@ function contextNote(input) {
   if (session.compactNoted) return null;
   session.compactNoted = new Date().toISOString();
   saveSession(input.session_id, session);
-  return `[flow] This session is at ${Math.round(context / 1000)}k tokens. Claude Code compacts sessions by itself past ${Math.round(window / 1000)}k, but this one started before that setting: /compact now, or reopen the session, and it applies.`;
+  return `[flow] This session is at ${Math.round(context / 1000)}k tokens, over the ${Math.round(window / 1000)}k auto-compact window in your settings, so it likely started before that setting: /compact now, or reopen the session, and new requests use it.`;
 }
 
 try {

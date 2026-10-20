@@ -2,7 +2,7 @@
 import "./isolate.mjs";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, test } from "node:test";
@@ -116,25 +116,28 @@ describe("session start and the context guard", () => {
     const transcript = join(repo, "t.jsonl");
     const old = new Date(Date.now() - 3 * 60 * 60_000).toISOString();
     const usage = (tokens) => `${JSON.stringify({ type: "assistant", timestamp: old, message: { usage: { input_tokens: 10, cache_read_input_tokens: tokens, cache_creation_input_tokens: 0 } } })}\n`;
+    const prompt = (session, env = {}) => spawnSync("node", [join(plugin, "hooks", "prompt.mjs")], { input: JSON.stringify({ transcript_path: transcript, session_id: session }), encoding: "utf8", env: { ...process.env, FLOW_FEEDBACK_HOME: testStore, CLAUDE_CODE_SESSION_ATTENDED: "1", ...env } });
     const settings = join(process.env.CLAUDE_CONFIG_DIR, "settings.json");
     mkdirSync(process.env.CLAUDE_CONFIG_DIR, { recursive: true });
     try {
       // No window set (the engineer's own choice, or flow hasn't run session start yet): quiet, idle or not.
       writeFileSync(transcript, usage(600_000));
-      const quiet = hook("prompt.mjs", { transcript_path: transcript, session_id: "ctx-1" });
+      const quiet = prompt("ctx-1");
       assert.equal(quiet.status, 0);
       assert.equal(quiet.stdout, "");
       // A 500k window is set but this session is past it: it started before the setting. One line, once.
       writeFileSync(settings, JSON.stringify({ autoCompactWindow: 500_000 }));
-      const first = hook("prompt.mjs", { transcript_path: transcript, session_id: "ctx-2" });
-      assert.match(JSON.parse(first.stdout).systemMessage, /at 600k tokens.*past 500k.*started before that setting/);
-      assert.equal(hook("prompt.mjs", { transcript_path: transcript, session_id: "ctx-2" }).stdout, "");
-      // A larger window the engineer chose, or a small context: nothing.
+      assert.match(JSON.parse(prompt("ctx-2").stdout).systemMessage, /at 600k tokens, over the 500k auto-compact window/);
+      assert.equal(prompt("ctx-2").stdout, "");
+      // Headless sessions, a larger window the engineer chose, a small context, or a compaction since: nothing.
+      assert.equal(prompt("ctx-5", { CLAUDE_CODE_SESSION_ATTENDED: "0" }).stdout, "");
       writeFileSync(settings, JSON.stringify({ autoCompactWindow: 900_000 }));
-      assert.equal(hook("prompt.mjs", { transcript_path: transcript, session_id: "ctx-3" }).stdout, "");
+      assert.equal(prompt("ctx-3").stdout, "");
       writeFileSync(settings, JSON.stringify({ autoCompactWindow: 500_000 }));
+      writeFileSync(transcript, usage(600_000) + `${JSON.stringify({ type: "system", subtype: "compact_boundary", content: "Conversation compacted" })}\n`);
+      assert.equal(prompt("ctx-6").stdout, "");
       writeFileSync(transcript, usage(20_000));
-      assert.equal(hook("prompt.mjs", { transcript_path: transcript, session_id: "ctx-4" }).stdout, "");
+      assert.equal(prompt("ctx-4").stdout, "");
     } finally { rmSync(process.env.CLAUDE_CONFIG_DIR, { recursive: true, force: true }); }
   });
 });
@@ -145,62 +148,95 @@ describe("autoCompactWindow (flow 2.4.4)", () => {
     const dir = mkdtempSync(join(tmpdir(), "flow-acw-claude-")), store = mkdtempSync(join(tmpdir(), "flow-acw-store-"));
     writeFileSync(join(store, "config.json"), JSON.stringify({ noticeShown: "x" }));
     setup(dir, store);
-    const run = () => spawnSync("node", [join(plugin, "hooks", "session-start.mjs")], { input: JSON.stringify({ session_id: "s", cwd: repo, source: "startup" }), encoding: "utf8", env: { ...process.env, CLAUDE_CONFIG_DIR: dir, FLOW_FEEDBACK_HOME: store, CLAUDE_CODE_SESSION_ATTENDED: "1", ...env } });
+    const run = (more = {}) => spawnSync("node", [join(plugin, "hooks", "session-start.mjs")], { input: JSON.stringify({ session_id: "s", cwd: repo, source: "startup" }), encoding: "utf8", env: { ...process.env, CLAUDE_CONFIG_DIR: dir, FLOW_FEEDBACK_HOME: store, CLAUDE_CODE_SESSION_ATTENDED: "1", ...env, ...more } });
     const settings = () => { try { return readFileSync(join(dir, "settings.json"), "utf8"); } catch { return null; } };
     return { dir, store, run, settings, done: () => { rmSync(dir, { recursive: true, force: true }); rmSync(store, { recursive: true, force: true }); } };
   };
+  const SET = /compacts a session by itself as it nears 500k tokens/;
 
-  test("sets 500k once, keeps the engineer's other settings and indentation, and tells them", () => {
-    const c = start((dir) => writeFileSync(join(dir, "settings.json"), '{\n    "model": "opus",\n    "permissions": { "allow": ["Bash(ls)"] }\n}\n'));
+  test("sets 500k once, keeps the rest of the file byte for byte, and tells the engineer", () => {
+    const original = '{\n    "model": "opus",\n    "permissions": { "allow": ["Bash(ls)"] }\n}\n';
+    const c = start((dir) => writeFileSync(join(dir, "settings.json"), original, { mode: 0o640 }));
     try {
       const r = c.run();
       assert.equal(r.status, 0);
-      assert.match(JSON.parse(r.stdout).systemMessage, /compacts a session by itself as it nears 500k tokens/);
-      const after = c.settings();
-      assert.deepEqual(JSON.parse(after), { model: "opus", permissions: { allow: ["Bash(ls)"] }, autoCompactWindow: 500_000 });
-      assert.match(after, /\n {4}"model"/);
+      assert.match(JSON.parse(r.stdout).systemMessage, SET);
+      assert.equal(c.settings(), '{\n    "model": "opus",\n    "permissions": { "allow": ["Bash(ls)"] },\n    "autoCompactWindow": 500000\n}\n');
+      assert.equal(statSync(join(c.dir, "settings.json")).mode & 0o777, 0o640);
       // Removed by the engineer: never set again, and no message.
       writeFileSync(join(c.dir, "settings.json"), '{ "model": "opus" }\n');
       const again = c.run();
-      assert.doesNotMatch(again.stdout, /autoCompactWindow/);
+      assert.doesNotMatch(again.stdout, SET);
       assert.equal(c.settings(), '{ "model": "opus" }\n');
     } finally { c.done(); }
   });
 
-  test("creates the settings file when the config dir has none", () => {
-    const c = start();
+  test("keeps CRLF line endings and a one-line file's shape; creates the file when there is none", () => {
+    const crlf = start((dir) => writeFileSync(join(dir, "settings.json"), '{\r\n  "model": "opus"\r\n}\r\n'));
+    const empty = start((dir) => writeFileSync(join(dir, "settings.json"), "{}"));
+    const none = start();
+    try {
+      crlf.run(); empty.run(); none.run();
+      assert.equal(crlf.settings(), '{\r\n  "model": "opus",\r\n  "autoCompactWindow": 500000\r\n}\r\n');
+      assert.deepEqual(JSON.parse(empty.settings()), { autoCompactWindow: 500_000 });
+      assert.deepEqual(JSON.parse(none.settings()), { autoCompactWindow: 500_000 });
+    } finally { crlf.done(); empty.done(); none.done(); }
+  });
+
+  test("writes through a symlinked settings file and keeps the link", () => {
+    const c = start((dir) => {
+      mkdirSync(join(dir, "dotfiles"));
+      writeFileSync(join(dir, "dotfiles", "claude.json"), '{"model": "opus"}');
+      symlinkSync(join(dir, "dotfiles", "claude.json"), join(dir, "settings.json"));
+    });
     try {
       c.run();
-      assert.deepEqual(JSON.parse(c.settings()), { autoCompactWindow: 500_000 });
+      assert.ok(lstatSync(join(c.dir, "settings.json")).isSymbolicLink());
+      assert.deepEqual(JSON.parse(readFileSync(join(c.dir, "dotfiles", "claude.json"), "utf8")), { model: "opus", autoCompactWindow: 500_000 });
+    } finally { c.done(); }
+  });
+
+  test("a window the engineer already had stays theirs, even after they remove it", () => {
+    const c = start((dir) => writeFileSync(join(dir, "settings.json"), '{"autoCompactWindow": 800000}'));
+    try {
+      c.run();
+      assert.equal(c.settings(), '{"autoCompactWindow": 800000}');
+      writeFileSync(join(c.dir, "settings.json"), "{}");
+      c.run();
+      assert.equal(c.settings(), "{}");
     } finally { c.done(); }
   });
 
   for (const [name, setup, env] of [
-    ["a window the engineer chose", (dir) => writeFileSync(join(dir, "settings.json"), '{"autoCompactWindow": 800000}')],
     ["a per-model window", (dir) => writeFileSync(join(dir, "settings.json"), '{"modelOverrides": {"opus": {"autoCompactWindow": "auto"}}}')],
     ["auto-compact turned off in settings", (dir) => writeFileSync(join(dir, "settings.json"), '{"autoCompactEnabled": false}')],
     ["auto-compact turned off in /config", (dir) => { writeFileSync(join(dir, "settings.json"), "{}"); writeFileSync(join(dir, ".claude.json"), '{"autoCompactEnabled": false}'); }],
     ["the window set in the environment", (dir) => writeFileSync(join(dir, "settings.json"), "{}"), { CLAUDE_CODE_AUTO_COMPACT_WINDOW: "700000" }],
     ["compaction disabled in the environment", (dir) => writeFileSync(join(dir, "settings.json"), "{}"), { DISABLE_AUTO_COMPACT: "1" }],
     ["a settings file that isn't valid JSON", (dir) => writeFileSync(join(dir, "settings.json"), '{"model": "opus",}')],
+    ["a read-only settings file", (dir) => writeFileSync(join(dir, "settings.json"), "{}", { mode: 0o444 })],
+    ["a symlink to nowhere", (dir) => symlinkSync(join(dir, "missing.json"), join(dir, "settings.json"))],
+    ["a headless session", (dir) => writeFileSync(join(dir, "settings.json"), "{}"), { CLAUDE_CODE_SESSION_ATTENDED: "0" }],
+    ["a session that doesn't say it's attended", (dir) => writeFileSync(join(dir, "settings.json"), "{}"), { CLAUDE_CODE_SESSION_ATTENDED: "" }],
   ]) {
     test(`leaves the settings alone: ${name}`, () => {
       const c = start(setup, env);
       try {
-        const before = c.settings();
+        const before = c.settings(), linked = (() => { try { return lstatSync(join(c.dir, "settings.json")).isSymbolicLink(); } catch { return false; } })();
         const r = c.run();
         assert.equal(r.status, 0);
         assert.equal(c.settings(), before);
-        assert.doesNotMatch(r.stdout, /compacts a session by itself/);
+        if (linked) assert.ok(lstatSync(join(c.dir, "settings.json")).isSymbolicLink());
+        assert.doesNotMatch(r.stdout, SET);
       } finally { c.done(); }
     });
   }
 
-  test("an unattended (headless) session never touches the settings", () => {
-    const c = start((dir) => writeFileSync(join(dir, "settings.json"), "{}"), { CLAUDE_CODE_SESSION_ATTENDED: "0" });
+  test("feedback capture off doesn't turn this off", () => {
+    const c = start((dir) => writeFileSync(join(dir, "settings.json"), "{}"), { FLOW_FEEDBACK: "off" });
     try {
       c.run();
-      assert.equal(c.settings(), "{}");
+      assert.deepEqual(JSON.parse(c.settings()), { autoCompactWindow: 500_000 });
     } finally { c.done(); }
   });
 });
