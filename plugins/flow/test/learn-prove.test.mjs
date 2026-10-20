@@ -239,7 +239,9 @@ describe("propose: allowed paths, the gh allowlist, the PR body, a real git remo
       // The candidate: a rule plus a NEW case (with held-out fixtures) for this cluster. A force-push rule: no existing
       // case covers it, so the re-run suite must show no regression.
       const NO_FORCE = { id: "no-force-push", why: "no force-pushing", covers: ["push"], phrases: ["\\bdon'?t force[- ]?push\\b"], release: ["\\byou can force[- ]?push\\b"], blocks: ["\\bgit\\s+push\\b[^|;&]*\\s(-f|--force|--force-with-lease)\\b"] };
-      writeFileSync(join(work, "plugins/flow/hooks/constraint-rules.json"), JSON.stringify({ rules: [NO_FORCE] }));
+      // Added to the repo's rules, never replacing them: a shipped rule's own case would read as a regression.
+      const shipped = JSON.parse(readFileSync(join(work, "plugins/flow/hooks/constraint-rules.json"), "utf8"));
+      writeFileSync(join(work, "plugins/flow/hooks/constraint-rules.json"), JSON.stringify({ ...shipped, rules: [...(shipped.rules ?? []), NO_FORCE] }));
       const caseDir = join(work, "plugins/flow/learn/cases/no-force-push");
       mkdirSync(caseDir, { recursive: true });
       writeFileSync(join(caseDir, "case.json"), JSON.stringify({ id: "no-force-push", kind: "deterministic", cluster: pushCluster.id, author: "test", hook: "guard-bash", fixtures: [

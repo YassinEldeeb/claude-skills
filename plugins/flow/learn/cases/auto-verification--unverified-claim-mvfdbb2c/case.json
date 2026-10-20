@@ -216,6 +216,42 @@
       "command": "cargo test 2>&1 | tail -20",
       "expect": "allow",
       "heldOut": true
+    },
+    {
+      "name": "report citing test counts",
+      "constraints": [
+        "verify-before-report"
+      ],
+      "command": "gh pr comment 214 --body \"Fixed the retry bug: npm test 42 passed, 0 failed\"",
+      "expect": "allow",
+      "heldOut": false
+    },
+    {
+      "name": "status line citing CI",
+      "constraints": [
+        "verify-before-report"
+      ],
+      "command": "echo \"DONE: migration recorded, CI green on 9f3e2a1\" >> .flow/status.md",
+      "expect": "allow",
+      "heldOut": false
+    },
+    {
+      "name": "held-out: tmux report with check results",
+      "constraints": [
+        "verify-before-report"
+      ],
+      "command": "tmux send-keys -t coordinator \"auth refactor complete; tests passing (118/118)\" Enter",
+      "expect": "allow",
+      "heldOut": true
+    },
+    {
+      "name": "held-out: claim with no evidence still blocked",
+      "constraints": [
+        "verify-before-report"
+      ],
+      "command": "gh pr comment 31 --body \"All fixed and working now.\"",
+      "expect": "block",
+      "heldOut": true
     }
   ]
 }
