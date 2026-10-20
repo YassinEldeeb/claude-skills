@@ -14,6 +14,8 @@ The goal: catch expensive mistakes (wrong problem, wrong architecture, wrong eco
 
 Read the relevant code, recent PRs, logs and data. For a bug, find the first cause and whether it's a regression (when, which PR). Small work: minutes, not hours.
 
+**Access first.** List what the task needs that you can't reach yet: a signed-in dashboard, admin page, staging app or vendor console. If you can drive a browser (Claude in Chrome, the built-in browser), ask once, now, in one message: which page to open and what to sign in to (that sign-in is the go-ahead to read there); if you can't, ask for a screenshot or an export instead. Never ask for or type passwords or codes; the engineer signs in. Then use that browser to read, test and unblock yourself, and keep working on everything else while you wait. It is read-only by default: read only what the task needs, and never approve, merge, post approvals, change settings or secrets, or write to production there (🔴).
+
 ## 2. Classify
 
 - Read `.flow/config.json` `risk`: which rules will this work trip? On an existing diff run `node .github/flow/flow.mjs classify`.

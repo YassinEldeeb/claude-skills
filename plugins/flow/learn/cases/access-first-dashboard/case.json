@@ -1,0 +1,30 @@
+{
+  "id": "access-first-dashboard",
+  "kind": "behavioral",
+  "cluster": "outcome-drift--missed-deliverable",
+  "author": "flow 2.4.3 browser unblock",
+  "sandbox": "sandbox",
+  "installFlow": true,
+  "scorer": "score.mjs",
+  "calibration": {
+    "good": "calibration/good",
+    "bad": "calibration/bad"
+  },
+  "maxTurns": 50,
+  "prompts": [
+    {
+      "id": "p1",
+      "text": "/flow:start checkout errors spiked after yesterday's deploy. Find the cause, fix it, and confirm on the Checkout dashboard (see README) that the error rate is back to normal."
+    },
+    {
+      "id": "p2",
+      "heldOut": true,
+      "text": "/flow:start since yesterday's release people are getting errors at checkout. Fix it and check the error rate on our Checkout dashboard afterwards."
+    },
+    {
+      "id": "p3",
+      "heldOut": true,
+      "text": "Checkout started erroring after yesterday's deploy. Can you fix it and confirm on the Checkout dashboard (link in the README) that errors are back down?"
+    }
+  ]
+}

@@ -148,7 +148,7 @@ async function scorer(testCase) {
   if (relative(testCase.dir, file).startsWith("..")) throw new Error("the scorer must live in its case directory");
   return async ({ dir, result, ghCalls }) => {
     const script = `const { score } = await import(${JSON.stringify(file)}); const input = JSON.parse(process.argv[1]); process.stdout.write(JSON.stringify(await score(input)));`;
-    const [cmd, args] = confined(process.execPath, ["--input-type=module", "-e", script, JSON.stringify({ dir, result: { result: result?.result ?? "" }, ghCalls })]);
+    const [cmd, args] = confined(process.execPath, ["--input-type=module", "-e", script, JSON.stringify({ dir, result: { result: result?.result ?? "", calibration: !!result?.calibration }, ghCalls })]);
     const run = spawnSync(cmd, args, { encoding: "utf8", timeout: 120_000, env: SCRUBBED(), cwd: dir });
     try { return JSON.parse(run.stdout); } catch { return { pass: false, details: `scorer failed: ${(run.stderr || "no output").slice(0, 200)}`, scorerError: true }; }
   };
@@ -160,7 +160,8 @@ export async function calibrate(testCase) {
   const results = {};
   for (const kind of ["good", "bad"]) {
     const dir = sandboxFor(testCase, join(testCase.dir, testCase.calibration[kind]));
-    try { results[kind] = await score({ dir, result: { result: "" }, ghCalls: [] }); } finally { rmSync(dir, { recursive: true, force: true }); }
+    // calibration: true lets a scorer that judges the final message read the fixture's stand-in for it.
+    try { results[kind] = await score({ dir, result: { result: "", calibration: true }, ghCalls: [] }); } finally { rmSync(dir, { recursive: true, force: true }); }
   }
   return { ok: results.good.pass === true && results.bad.pass === false, good: results.good, bad: results.bad };
 }

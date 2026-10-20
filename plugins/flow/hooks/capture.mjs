@@ -6,7 +6,7 @@ import { loadSession } from "../learn/store.mjs";
 
 const here = dirname(new URL(import.meta.url).pathname);
 // The plugin's version (the gate in repos keeps its own FLOW_VERSION; it didn't change in 2.1).
-export const PLUGIN_VERSION = "2.4.2";
+export const PLUGIN_VERSION = "2.4.3";
 
 /**
  * A prompt an engineer typed: Claude Code marks it source "user" (verified in 2.1.301's schema). The field may be
